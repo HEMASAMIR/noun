@@ -1,0 +1,66 @@
+# ===== Flutter / Dart =====
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+pubspec.lock
+
+# ===== Android =====
+android/.gradle/
+android/local.properties
+android/key.properties
+android/captures/
+android/build/
+android/.kotlin/
+android/**/*.hprof
+*.hprof
+
+# ===== iOS =====
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+ios/Runner/GeneratedPluginRegistrant.*
+
+# ===== macOS =====
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Flutter/ephemeral/
+
+# ===== Windows / Linux =====
+windows/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugin_registrant.h
+windows/flutter/generated_plugins.cmake
+linux/flutter/generated_plugin_registrant.cc
+linux/flutter/generated_plugin_registrant.h
+linux/flutter/generated_plugins.cmake
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ===== Logs & Reports =====
+*.log
+*.txt
+analyze*.txt
+analyze_*.txt
+android/build/
+noon_test.html
+
+# ===== Test/Debug scripts =====
+test_noon.dart
+test_noon_api.dart
+
+# ===== Nested duplicate project =====
+walid_wasfy/
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
