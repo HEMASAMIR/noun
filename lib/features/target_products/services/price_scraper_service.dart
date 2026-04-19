@@ -86,217 +86,344 @@ class PriceScraperService {
     }
   }
 
-  // Future<Map<String, dynamic>> _scrapeWithWebView(String url, String storeName) async {
-  //   final completer = Completer<Map<String, dynamic>>();
-  //   HeadlessInAppWebView? headlessWebView;
-
-  //   headlessWebView = HeadlessInAppWebView(
-  //     initialUrlRequest: URLRequest(url: WebUri(url)),
-  //     initialSettings: InAppWebViewSettings(
-  //       javaScriptEnabled: true,
-  //       userAgent: 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
-  //       cacheEnabled: true,
-  //       useShouldOverrideUrlLoading: false,
-  //       useOnLoadResource: false,
-  //       disableDefaultErrorPage: true,
-  //       preferredContentMode: UserPreferredContentMode.MOBILE,
-  //     ),
-  //     onLoadStop: (controller, uri) async {
-  //       await Future.delayed(const Duration(milliseconds: 2000));
-
-  //       try {
-  //          final String script = '''
-  //           (function() {
-  //             let price = 0;
-  //             let sellers = [];
-  //             let title = document.title;
-  //             let image = "";
-
-  //             // 1. Try Next Data
-  //             try {
-  //               let el = document.getElementById('__NEXT_DATA__');
-  //               if (el) {
-  //                 let data = JSON.parse(el.textContent);
-  //                 let product = data?.props?.pageProps?.product || data?.props?.pageProps?.catalog?.product;
-  //                 if (product) {
-  //                   title = product.name || title;
-  //                   if (product.image_keys && product.image_keys.length > 0) {
-  //                     image = 'https://f.nooncdn.com/p/' + product.image_keys[0] + '.jpg';
-  //                   }
-  //                   if (product.variants && product.variants[0] && product.variants[0].offers) {
-  //                     product.variants[0].offers.forEach(o => {
-  //                       let p = parseFloat(o.sale_price) || parseFloat(o.price);
-  //                       if (p > 0) sellers.push({ "name": o.seller_name || "نون", "price": p });
-  //                     });
-  //                   }
-  //                 }
-  //               }
-  //             } catch(_) {}
-
-  //             // 2. DOM Queries if sellers empty
-  //             if (sellers.length === 0) {
-  //               let h1 = document.querySelector('h1');
-  //               if (h1) title = h1.innerText.trim();
-
-  //               let ogImg = document.querySelector('meta[property="og:image"]');
-  //               if (ogImg) image = ogImg.content;
-
-  //               let priceEls = document.querySelectorAll('.priceNow, .price, [class*="priceNow"], [data-qa="product-price"], .a-price-whole, #priceblock_ourprice');
-  //               let foundPrices = [];
-  //               priceEls.forEach(el => {
-  //                  let text = el.innerText.replace(/[^0-9.]/g, '');
-  //                  let p = parseFloat(text);
-  //                  if (p > 0 && p < 100000) foundPrices.push(p);
-  //               });
-
-  //               if (foundPrices.length > 0) {
-  //                  foundPrices.sort((a,b) => a - b);
-  //                  sellers.push({name: "$storeName", price: foundPrices[0]});
-  //               } else {
-  //                  // 3. Fallback: only trust larger prices or more specific selectors if structured data fails
-  //                  let bodyText = document.body.innerText;
-  //                  let regex = /(?:SAR|ريال|ر\.س|AED|درهم|EGP|ج\.م)\s*([0-9,]*\.?[0-9]+)|([0-9,]*\.?[0-9]+)\s*(?:SAR|ريال|ر\.س|AED|درهم|EGP|ج\.م)/ig;
-  //                  let matches;
-  //                  while ((matches = regex.exec(bodyText)) !== null) {
-  //                    let pStr = matches[1] || matches[2];
-  //                    if (pStr) {
-  //                      let p = parseFloat(pStr.replace(/[^0-9.]/g, ''));
-  //                      // Avoid absurdly low numbers being parsed as product prices (e.g. 12 SAR delivery fee) unless no other prices are found, but even then be cautious.
-  //                      if (p > 15 && p < 100000) foundPrices.push(p);
-  //                    }
-  //                  }
-  //                  if (foundPrices.length > 0) {
-  //                    // Filter outliers by removing prices clearly lower than the median (e.g. 12 SAR for a 5000 SAR phone)
-  //                    foundPrices.sort((a,b) => a - b);
-  //                    let medianPrice = foundPrices[Math.floor(foundPrices.length / 2)];
-  //                    let validPrices = foundPrices.filter(p => p >= (medianPrice * 0.3)); // Accept prices at least 30% of median to eliminate delivery fees
-  //                    if (validPrices.length > 0) {
-  //                      sellers.push({name: storeName + " (تقريبي)", price: validPrices[0]});
-  //                    } else {
-  //                      sellers.push({name: storeName + " (تقريبي)", price: foundPrices[0]});
-  //                    }
-  //                  }
-  //               }
-  //             }
-
-  //             if (sellers.length > 0) {
-  //               sellers.sort((a, b) => a.price - b.price);
-  //               price = sellers[0].price;
-  //             }
-
-  //             return JSON.stringify({
-  //               "price": price,
-  //               "title": title,
-  //               "image": image,
-  //               "sellers": sellers
-  //             });
-  //           })()
-  //         ''';
-
-  //         final String resultsJson = await controller.evaluateJavascript(source: script);
-  //         final data = jsonDecode(resultsJson);
-
-  //         if (!completer.isCompleted) {
-  //           completer.complete({
-  //             'price': (data['price'] as num?)?.toDouble() ?? 0.0,
-  //             'title': data['title'] ?? 'منتج غير معروف',
-  //             'image': data['image'] ?? '',
-  //             'store': storeName,
-  //             'sellers': data['sellers'] ?? [],
-  //           });
-  //         }
-  //       } catch (e) {
-  //         if (!completer.isCompleted) completer.complete({'price': 0.0, 'title': 'خطأ في جلب البيانات', 'image': '', 'store': storeName, 'sellers': []});
-  //       } finally {
-  //         headlessWebView?.dispose();
-  //       }
-  //     },
-  //     onReceivedError: (controller, request, error) {
-  //       if (!completer.isCompleted) {
-  //         completer.complete({'price': 0.0, 'title': 'لا يوجد اتصال بالإنترنت', 'image': '', 'store': storeName, 'sellers': []});
-  //       }
-  //       headlessWebView?.dispose();
-  //     },
-  //   );
-
-  //   await headlessWebView.run();
-
-  //   return completer.future.timeout(
-  //     const Duration(seconds: 40),
-  //     onTimeout: () {
-  //       headlessWebView?.dispose();
-  //       return {'price': 0.0, 'title': 'انتهت المهلة، لا يوجد اتصال', 'image': '', 'store': storeName, 'sellers': []};
-  //     },
-  //   );
-  // }
   Future<Map<String, dynamic>> _scrapeWithWebView(
     String url,
     String storeName,
   ) async {
-    try {
-      // استخرج الـ product ID من الرابط
-      final uri = Uri.parse(url);
-      final pathParts = uri.pathSegments;
-      String productId = '';
+    final completer = Completer<Map<String, dynamic>>();
+    HeadlessInAppWebView? headlessWebView;
 
-      for (var part in pathParts) {
-        if (part.startsWith('N') && part.length > 5) {
-          productId = part;
-          break;
+    headlessWebView = HeadlessInAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri(url)),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        userAgent:
+            'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+        cacheEnabled: true,
+        useShouldOverrideUrlLoading: false,
+        useOnLoadResource: false,
+        disableDefaultErrorPage: true,
+        preferredContentMode: UserPreferredContentMode.MOBILE,
+      ),
+      onLoadStop: (controller, uri) async {
+        await Future.delayed(const Duration(milliseconds: 3000));
+
+        try {
+          final String script =
+              '''
+            (function() {
+              let price = 0;
+              let sellers = [];
+              let title = document.title;
+              let image = "";
+
+              // Helper: try to get image from og:image
+              let ogImg = document.querySelector('meta[property="og:image"]');
+              if (ogImg) image = ogImg.getAttribute('content') || '';
+
+              // Helper: get h1 for title
+              let h1 = document.querySelector('h1');
+              if (h1 && h1.innerText.trim()) title = h1.innerText.trim();
+
+              // ===== STRATEGY 1: __NEXT_DATA__ (multiple known paths) =====
+              try {
+                let el = document.getElementById('__NEXT_DATA__');
+                if (el) {
+                  let data = JSON.parse(el.textContent);
+                  // Try all known paths in Noon's NEXT_DATA
+                  let product =
+                    data?.props?.pageProps?.product ||
+                    data?.props?.pageProps?.catalog?.product ||
+                    data?.props?.pageProps?.data?.product ||
+                    data?.props?.pageProps?.initialData?.product ||
+                    null;
+
+                  // Deep search helper
+                  if (!product) {
+                    let str = el.textContent;
+                    let m = str.match(/"sale_price"\s*:\s*"?(\d+\.?\d*)"?/);
+                    if (m) {
+                      let p = parseFloat(m[1]);
+                      if (p > 0) sellers.push({ name: "$storeName", price: p });
+                    }
+                    // Also try "price":"xxx"
+                    if (sellers.length === 0) {
+                      let m2 = str.match(/"now"\s*:\s*"?(\d+\.?\d*)"?/);
+                      if (m2) {
+                        let p2 = parseFloat(m2[1]);
+                        if (p2 > 0) sellers.push({ name: "$storeName", price: p2 });
+                      }
+                    }
+                  }
+
+                  if (product) {
+                    title = product.name || product.title || title;
+                    // Image
+                    if (product.image_keys && product.image_keys.length > 0) {
+                      image = 'https://f.nooncdn.com/p/' + product.image_keys[0] + '.jpg';
+                    } else if (product.image_url) {
+                      image = product.image_url;
+                    }
+                    // Offers/variants
+                    let variants = product.variants || [];
+                    variants.forEach(v => {
+                      let offers = v.offers || [];
+                      offers.forEach(o => {
+                        let p = parseFloat(o.sale_price) || parseFloat(o.price) || parseFloat(o.now) || 0;
+                        if (p > 0) sellers.push({ name: o.seller_name || "$storeName", price: p });
+                      });
+                    });
+                    // Direct price fields
+                    if (sellers.length === 0) {
+                      let p =
+                        parseFloat(product.sale_price) ||
+                        parseFloat(product.price?.now) ||
+                        parseFloat(product.price) ||
+                        parseFloat(product.now) ||
+                        0;
+                      if (p > 0) sellers.push({ name: "$storeName", price: p });
+                    }
+                  }
+                }
+              } catch(e1) {}
+
+              // ===== STRATEGY 2: window.__APP_STATE__ or similar globals =====
+              if (sellers.length === 0) {
+                try {
+                  let appKeys = ['__APP_STATE__','__INITIAL_STATE__','__REDUX_STATE__','__PRELOADED_STATE__'];
+                  for (let k of appKeys) {
+                    if (window[k]) {
+                      let str = JSON.stringify(window[k]);
+                      let m = str.match(/"sale_price"\s*:\s*"?(\d+\.?\d*)"?/);
+                      if (!m) m = str.match(/"now"\s*:\s*"?(\d+\.?\d*)"?/);
+                      if (m) {
+                        let p = parseFloat(m[1]);
+                        if (p > 0) { sellers.push({ name: "$storeName", price: p }); break; }
+                      }
+                    }
+                  }
+                } catch(e2) {}
+              }
+
+              // ===== STRATEGY 3: JSON-LD structured data =====
+              if (sellers.length === 0) {
+                try {
+                  let jsonLds = document.querySelectorAll('script[type="application/ld+json"]');
+                  jsonLds.forEach(s => {
+                    try {
+                      let d = JSON.parse(s.textContent);
+                      let items = Array.isArray(d) ? d : [d];
+                      items.forEach(item => {
+                        let offers = item.offers || item.Offers;
+                        if (offers) {
+                          let offerList = Array.isArray(offers) ? offers : [offers];
+                          offerList.forEach(o => {
+                            let p = parseFloat(o.price) || parseFloat(o.lowPrice) || 0;
+                            if (p > 0) sellers.push({ name: o.seller?.name || "$storeName", price: p });
+                          });
+                        }
+                      });
+                    } catch(_) {}
+                  });
+                } catch(e3) {}
+              }
+
+              // ===== STRATEGY 4: DOM selectors (Noon-specific + generic) =====
+              if (sellers.length === 0) {
+                let foundPrices = [];
+                // Noon-specific modern selectors
+                let noonSelectors = [
+                  '[data-qa="product-price"]',
+                  '[class*="price"][class*="now"]',
+                  '[class*="priceNow"]',
+                  '[class*="selling-price"]',
+                  '[class*="sellingPrice"]',
+                  '.price-now',
+                  '.priceNow',
+                  'span[class*="Price"]',
+                  '[class*="ProductPrice"]',
+                  '[data-testid="product-price"]',
+                  '.a-price-whole',
+                  '#priceblock_ourprice',
+                ];
+                for (let sel of noonSelectors) {
+                  document.querySelectorAll(sel).forEach(el => {
+                    let text = el.innerText.replace(/[^0-9.]/g, '');
+                    let p = parseFloat(text);
+                    if (p > 10 && p < 100000) foundPrices.push(p);
+                  });
+                }
+                if (foundPrices.length > 0) {
+                  foundPrices.sort((a,b) => a - b);
+                  sellers.push({ name: "$storeName", price: foundPrices[0] });
+                }
+              }
+
+              // ===== STRATEGY 5: Regex on page body text =====
+              if (sellers.length === 0) {
+                try {
+                  let bodyText = document.body ? document.body.innerText : '';
+                  let foundPrices = [];
+                  // SAR patterns
+                  let r1 = /(?:SAR|ريال|ر\.س)\s*([0-9,]+\.?[0-9]*)/gi;
+                  let r2 = /([0-9,]+\.?[0-9]*)\s*(?:SAR|ريال|ر\.س)/gi;
+                  [r1, r2].forEach(rx => {
+                    let m;
+                    while ((m = rx.exec(bodyText)) !== null) {
+                      let p = parseFloat(m[1].replace(/,/g,''));
+                      if (p > 10 && p < 100000) foundPrices.push(p);
+                    }
+                  });
+                  if (foundPrices.length > 0) {
+                    foundPrices.sort((a,b) => a - b);
+                    let median = foundPrices[Math.floor(foundPrices.length/2)];
+                    let valid = foundPrices.filter(p => p >= median * 0.3);
+                    if (valid.length === 0) valid = foundPrices;
+                    sellers.push({ name: "$storeName (تقريبي)", price: valid[0] });
+                  }
+                } catch(e5) {}
+              }
+
+              // Final: pick lowest price
+              if (sellers.length > 0) {
+                sellers.sort((a, b) => a.price - b.price);
+                price = sellers[0].price;
+              }
+
+              return JSON.stringify({
+                "price": price,
+                "title": title,
+                "image": image,
+                "sellers": sellers
+              });
+            })()
+          ''';
+
+          final String resultsJson = await controller.evaluateJavascript(
+            source: script,
+          );
+          final data = jsonDecode(resultsJson);
+
+          if (!completer.isCompleted) {
+            completer.complete({
+              'price': (data['price'] as num?)?.toDouble() ?? 0.0,
+              'title': data['title'] ?? 'منتج غير معروف',
+              'image': data['image'] ?? '',
+              'store': storeName,
+              'sellers': data['sellers'] ?? [],
+            });
+          }
+        } catch (e) {
+          if (!completer.isCompleted)
+            completer.complete({
+              'price': 0.0,
+              'title': 'خطأ في جلب البيانات',
+              'image': '',
+              'store': storeName,
+              'sellers': [],
+            });
+        } finally {
+          headlessWebView?.dispose();
         }
-      }
-
-      if (productId.isEmpty) {
-        return _fallbackScrape(url, storeName);
-      }
-
-      // نون API مباشرة
-      final apiUrl =
-          'https://www.noon.com/api/v2/product/?sku=$productId&country=eg&lang=ar';
-
-      final response = await http
-          .get(
-            Uri.parse(apiUrl),
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json',
-              'Accept-Language': 'ar',
-              'Referer': 'https://www.noon.com/',
-            },
-          )
-          .timeout(const Duration(seconds: 20));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final product = data?['product'];
-
-        if (product != null) {
-          final price = (product['price']?['now'] ?? 0).toDouble();
-          final title = product['name'] ?? 'منتج غير معروف';
-          final image = product['image_keys']?[0] != null
-              ? 'https://f.nooncdn.com/p/${product['image_keys'][0]}.jpg'
-              : '';
-
-          return {
-            'price': price,
-            'title': title,
-            'image': image,
+      },
+      onReceivedError: (controller, request, error) {
+        if (!completer.isCompleted) {
+          completer.complete({
+            'price': 0.0,
+            'title': 'لا يوجد اتصال بالإنترنت',
+            'image': '',
             'store': storeName,
-            'sellers': price > 0
-                ? [
-                    {'name': storeName, 'price': price},
-                  ]
-                : [],
-          };
+            'sellers': [],
+          });
         }
-      }
+        headlessWebView?.dispose();
+      },
+    );
 
-      return _fallbackScrape(url, storeName);
-    } catch (e) {
-      return _fallbackScrape(url, storeName);
-    }
+    await headlessWebView.run();
+
+    return completer.future.timeout(
+      const Duration(seconds: 40),
+      onTimeout: () {
+        headlessWebView?.dispose();
+        return {
+          'price': 0.0,
+          'title': 'انتهت المهلة، لا يوجد اتصال',
+          'image': '',
+          'store': storeName,
+          'sellers': [],
+        };
+      },
+    );
   }
+  // Future<Map<String, dynamic>> _scrapeWithWebView(
+  //   String url,
+  //   String storeName,
+  // ) async {
+  //   try {
+  //     // استخرج الـ product ID من الرابط
+  //     final uri = Uri.parse(url);
+  //     final pathParts = uri.pathSegments;
+  //     String productId = '';
+
+  //     for (var part in pathParts) {
+  //       if (part.startsWith('N') && part.length > 5) {
+  //         productId = part;
+  //         break;
+  //       }
+  //     }
+
+  //     if (productId.isEmpty) {
+  //       return _fallbackScrape(url, storeName);
+  //     }
+
+  //     // نون API مباشرة
+  //     final apiUrl =
+  //         'https://www.noon.com/api/v2/product/?sku=$productId&country=eg&lang=ar';
+
+  //     final response = await http
+  //         .get(
+  //           Uri.parse(apiUrl),
+  //           headers: {
+  //             'User-Agent':
+  //                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  //             'Accept': 'application/json',
+  //             'Accept-Language': 'ar',
+  //             'Referer': 'https://www.noon.com/',
+  //           },
+  //         )
+  //         .timeout(const Duration(seconds: 20));
+
+  //     if (response.statusCode == 200) {
+  //       final data = jsonDecode(response.body);
+  //       final product = data?['product'];
+
+  //       if (product != null) {
+  //         final price = (product['price']?['now'] ?? 0).toDouble();
+  //         final title = product['name'] ?? 'منتج غير معروف';
+  //         final image = product['image_keys']?[0] != null
+  //             ? 'https://f.nooncdn.com/p/${product['image_keys'][0]}.jpg'
+  //             : '';
+
+  //         return {
+  //           'price': price,
+  //           'title': title,
+  //           'image': image,
+  //           'store': storeName,
+  //           'sellers': price > 0
+  //               ? [
+  //                   {'name': storeName, 'price': price},
+  //                 ]
+  //               : [],
+  //         };
+  //       }
+  //     }
+
+  //     return _fallbackScrape(url, storeName);
+  //   } catch (e) {
+  //     return _fallbackScrape(url, storeName);
+  //   }
+  // }
 
   Future<Map<String, dynamic>> _fallbackScrape(
     String url,

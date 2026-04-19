@@ -49,7 +49,9 @@ class TargetProductsViewModel extends ChangeNotifier {
 
     // 2. Delivery Filter
     if (_currentDeliveryFilter != null) {
-      filtered = filtered.where((p) => p.deliveryType == _currentDeliveryFilter).toList();
+      filtered = filtered
+          .where((p) => p.deliveryType == _currentDeliveryFilter)
+          .toList();
     }
 
     // 3. Sorting
@@ -58,7 +60,10 @@ class TargetProductsViewModel extends ChangeNotifier {
     return filtered;
   }
 
-  List<ProductModel> _sortProducts(List<ProductModel> list, ProductSortOption option) {
+  List<ProductModel> _sortProducts(
+    List<ProductModel> list,
+    ProductSortOption option,
+  ) {
     final result = List<ProductModel>.from(list);
     switch (option) {
       case ProductSortOption.newest:
@@ -154,7 +159,7 @@ class TargetProductsViewModel extends ChangeNotifier {
 
   Future<void> fetchAndAddProduct(String url, double targetPrice) async {
     final String id = DateTime.now().millisecondsSinceEpoch.toString();
-    
+
     // 1. Add Placeholder Product Immediately
     final placeholder = ProductModel(
       id: id,
@@ -177,88 +182,182 @@ class TargetProductsViewModel extends ChangeNotifier {
     _scrapeAndPopulateProduct(id, url, targetPrice);
   }
 
-  Future<void> _scrapeAndPopulateProduct(String id, String url, double targetPrice) async {
+  // Future<void> _scrapeAndPopulateProduct(String id, String url, double targetPrice) async {
+  //   try {
+  //     final googleShopping = GoogleShoppingService();
+  //     final scraper = PriceScraperService();
+
+  //     // Check if input is a URL
+  //     final uri = Uri.tryParse(url.trim());
+  //     final isUrl = uri != null && uri.hasScheme && uri.scheme.startsWith('http');
+
+  //     // ------- STEP 1: Get exact title + image from the original product page -------
+  //     String exactTitle = '';
+  //     String exactImage = '';
+  //     String exactStore = '';
+  //     double scraperPrice = 0.0;
+
+  //     if (isUrl) {
+  //       debugPrint('[Hybrid] Step 1: Scraping original URL for title+image...');
+  //       final scraperResult = await scraper.scrapeProductInfo(url);
+  //       exactTitle = scraperResult['title']?.toString() ?? '';
+  //       exactImage = scraperResult['image']?.toString() ?? '';
+  //       exactStore = scraperResult['store']?.toString() ?? '';
+  //       scraperPrice = (scraperResult['price'] as num?)?.toDouble() ?? 0.0;
+  //       debugPrint('[Hybrid] Step 1 result — title: "$exactTitle", scraperPrice: $scraperPrice');
+  //     } else {
+  //       // Plain text input (اسم المنتج مباشرة)
+  //       exactTitle = url.trim();
+  //     }
+
+  //     // ------- STEP 2: Search Google Shopping with the EXACT product title -------
+  //     final searchQuery = exactTitle.isNotEmpty ? exactTitle : url;
+  //     debugPrint('[Hybrid] Step 2: Searching Google Shopping for: "$searchQuery"');
+  //     final gsResult = await googleShopping.searchLowestPrice(searchQuery);
+  //     final double gsPrice = (gsResult['price'] as num?)?.toDouble() ?? 0.0;
+  //     debugPrint('[Hybrid] Step 2 result — lowest price: $gsPrice from ${gsResult['store']}');
+
+  //     // ------- COMBINE: title+image from Step 1, sellers+price from Step 2 -------
+  //     final String finalTitle = exactTitle.isNotEmpty
+  //         ? exactTitle
+  //         : (gsResult['title']?.toString() ?? '');
+  //     final String finalImage = exactImage.isNotEmpty
+  //         ? exactImage
+  //         : (gsResult['image']?.toString() ?? '');
+  //     final String finalStore = gsResult['store']?.toString().isNotEmpty == true
+  //         ? gsResult['store'].toString()
+  //         : (exactStore.isNotEmpty ? exactStore : 'Google Shopping');
+
+  //     // Build sellers list from Google Shopping
+  //     final List<ProductSeller> sellers = [];
+  //     if (gsResult['sellers'] != null && gsResult['sellers'] is List) {
+  //       for (var s in gsResult['sellers']) {
+  //         if (s is Map && s['name'] != null && s['price'] != null) {
+  //           sellers.add(ProductSeller(
+  //             name: s['name'].toString(),
+  //             price: (s['price'] as num).toDouble(),
+  //           ));
+  //         }
+  //       }
+  //     }
+
+  //     // Determine final lowest price
+  //     double lowestPrice = gsPrice > 0 ? gsPrice : scraperPrice;
+
+  //     // If Google Shopping found nothing at all, fall back entirely to scraper price
+  //     if (lowestPrice <= 0 && scraperPrice > 0) {
+  //       lowestPrice = scraperPrice;
+  //       if (exactStore.isNotEmpty) {
+  //         sellers.add(ProductSeller(name: exactStore, price: scraperPrice));
+  //       }
+  //     }
+
+  //     sellers.sort((a, b) => a.price.compareTo(b.price));
+  //     if (sellers.isNotEmpty) lowestPrice = sellers.first.price;
+
+  //     final index = _products.indexWhere((p) => p.id == id);
+  //     if (index == -1) return;
+
+  //     // Handle complete failure (no price from either source)
+  //     if (lowestPrice <= 0) {
+  //       _products[index] = _products[index].copyWith(
+  //         isAnalyzing: false,
+  //         error: 'تعذر جلب البيانات. يرجى التحقق من الرابط أو الاسم.',
+  //         title: finalTitle.isNotEmpty ? finalTitle : 'منتج غير مدعوم',
+  //       );
+  //       notifyListeners();
+  //       await _saveToStorage();
+  //       return;
+  //     }
+
+  //     final double finalTargetPrice = targetPrice > 0
+  //         ? targetPrice
+  //         : (lowestPrice * 0.9);
+
+  //     // Ensure the primary price appears in sellers list
+  //     if (!sellers.any((s) => (s.price - lowestPrice).abs() < 0.01) && lowestPrice > 0) {
+  //       sellers.insert(0, ProductSeller(name: finalStore, price: lowestPrice));
+  //     }
+
+  //     _products[index] = _products[index].copyWith(
+  //       title: finalTitle.isNotEmpty ? finalTitle : 'منتج',
+  //       storeName: finalStore,
+  //       currentPrice: lowestPrice,
+  //       targetPrice: finalTargetPrice,
+  //       deliveryType: DeliveryType.express,
+  //       imageUrl: finalImage.isNotEmpty ? finalImage : 'https://picsum.photos/200',
+  //       isAnalyzing: false,
+  //       sellers: sellers,
+  //       priceHistory: [lowestPrice],
+  //       error: null,
+  //     );
+
+  //     notifyListeners();
+  //     await _saveToStorage();
+
+  //     if (_products[index].hasReachedTarget) {
+  //       _triggerNotification(_products[index]);
+  //     }
+  //   } catch (e) {
+  //     final index = _products.indexWhere((p) => p.id == id);
+  //     if (index != -1) {
+  //       final errorStr = e.toString().toLowerCase();
+  //       String displayError = 'حدث خطأ: ${e.toString()}';
+  //       if (errorStr.contains('socketexception') || errorStr.contains('host lookup') || errorStr.contains('timeout')) {
+  //         displayError = 'يرجى التحقق من اتصالك بالإنترنت!';
+  //       }
+
+  //       _products[index] = _products[index].copyWith(
+  //         isAnalyzing: false,
+  //         error: displayError,
+  //       );
+  //       notifyListeners();
+  //     }
+  //   }
+  // }
+  Future<void> _scrapeAndPopulateProduct(
+    String id,
+    String url,
+    double targetPrice,
+  ) async {
     try {
-      final googleShopping = GoogleShoppingService();
       final scraper = PriceScraperService();
 
-      // Check if input is a URL
-      final uri = Uri.tryParse(url.trim());
-      final isUrl = uri != null && uri.hasScheme && uri.scheme.startsWith('http');
+      debugPrint('[Hybrid] Scraping: $url');
+      final scraperResult = await scraper.scrapeProductInfo(url);
+      debugPrint('[Hybrid] Result: $scraperResult');
 
-      // ------- STEP 1: Get exact title + image from the original product page -------
-      String exactTitle = '';
-      String exactImage = '';
-      String exactStore = '';
-      double scraperPrice = 0.0;
+      final String exactTitle = scraperResult['title']?.toString() ?? '';
+      final String exactImage = scraperResult['image']?.toString() ?? '';
+      final String exactStore = scraperResult['store']?.toString() ?? 'نون';
+      final double lowestPrice =
+          (scraperResult['price'] as num?)?.toDouble() ?? 0.0;
 
-      if (isUrl) {
-        debugPrint('[Hybrid] Step 1: Scraping original URL for title+image...');
-        final scraperResult = await scraper.scrapeProductInfo(url);
-        exactTitle = scraperResult['title']?.toString() ?? '';
-        exactImage = scraperResult['image']?.toString() ?? '';
-        exactStore = scraperResult['store']?.toString() ?? '';
-        scraperPrice = (scraperResult['price'] as num?)?.toDouble() ?? 0.0;
-        debugPrint('[Hybrid] Step 1 result — title: "$exactTitle", scraperPrice: $scraperPrice');
-      } else {
-        // Plain text input (اسم المنتج مباشرة)
-        exactTitle = url.trim();
-      }
-
-      // ------- STEP 2: Search Google Shopping with the EXACT product title -------
-      final searchQuery = exactTitle.isNotEmpty ? exactTitle : url;
-      debugPrint('[Hybrid] Step 2: Searching Google Shopping for: "$searchQuery"');
-      final gsResult = await googleShopping.searchLowestPrice(searchQuery);
-      final double gsPrice = (gsResult['price'] as num?)?.toDouble() ?? 0.0;
-      debugPrint('[Hybrid] Step 2 result — lowest price: $gsPrice from ${gsResult['store']}');
-
-      // ------- COMBINE: title+image from Step 1, sellers+price from Step 2 -------
-      final String finalTitle = exactTitle.isNotEmpty
-          ? exactTitle
-          : (gsResult['title']?.toString() ?? '');
-      final String finalImage = exactImage.isNotEmpty
-          ? exactImage
-          : (gsResult['image']?.toString() ?? '');
-      final String finalStore = gsResult['store']?.toString().isNotEmpty == true
-          ? gsResult['store'].toString()
-          : (exactStore.isNotEmpty ? exactStore : 'Google Shopping');
-
-      // Build sellers list from Google Shopping
+      // جيب البائعين
       final List<ProductSeller> sellers = [];
-      if (gsResult['sellers'] != null && gsResult['sellers'] is List) {
-        for (var s in gsResult['sellers']) {
+      if (scraperResult['sellers'] != null &&
+          scraperResult['sellers'] is List) {
+        for (var s in scraperResult['sellers']) {
           if (s is Map && s['name'] != null && s['price'] != null) {
-            sellers.add(ProductSeller(
-              name: s['name'].toString(),
-              price: (s['price'] as num).toDouble(),
-            ));
+            sellers.add(
+              ProductSeller(
+                name: s['name'].toString(),
+                price: (s['price'] as num).toDouble(),
+              ),
+            );
           }
         }
       }
 
-      // Determine final lowest price
-      double lowestPrice = gsPrice > 0 ? gsPrice : scraperPrice;
-
-      // If Google Shopping found nothing at all, fall back entirely to scraper price
-      if (lowestPrice <= 0 && scraperPrice > 0) {
-        lowestPrice = scraperPrice;
-        if (exactStore.isNotEmpty) {
-          sellers.add(ProductSeller(name: exactStore, price: scraperPrice));
-        }
-      }
-
-      sellers.sort((a, b) => a.price.compareTo(b.price));
-      if (sellers.isNotEmpty) lowestPrice = sellers.first.price;
-
       final index = _products.indexWhere((p) => p.id == id);
       if (index == -1) return;
 
-      // Handle complete failure (no price from either source)
+      // لو مجاش سعر
       if (lowestPrice <= 0) {
         _products[index] = _products[index].copyWith(
           isAnalyzing: false,
-          error: 'تعذر جلب البيانات. يرجى التحقق من الرابط أو الاسم.',
-          title: finalTitle.isNotEmpty ? finalTitle : 'منتج غير مدعوم',
+          error: exactTitle.isNotEmpty ? exactTitle : 'تعذر جلب البيانات',
+          title: 'تعذر جلب البيانات',
         );
         notifyListeners();
         await _saveToStorage();
@@ -269,18 +368,15 @@ class TargetProductsViewModel extends ChangeNotifier {
           ? targetPrice
           : (lowestPrice * 0.9);
 
-      // Ensure the primary price appears in sellers list
-      if (!sellers.any((s) => (s.price - lowestPrice).abs() < 0.01) && lowestPrice > 0) {
-        sellers.insert(0, ProductSeller(name: finalStore, price: lowestPrice));
-      }
-
       _products[index] = _products[index].copyWith(
-        title: finalTitle.isNotEmpty ? finalTitle : 'منتج',
-        storeName: finalStore,
+        title: exactTitle.isNotEmpty ? exactTitle : 'منتج',
+        storeName: exactStore,
         currentPrice: lowestPrice,
         targetPrice: finalTargetPrice,
         deliveryType: DeliveryType.express,
-        imageUrl: finalImage.isNotEmpty ? finalImage : 'https://picsum.photos/200',
+        imageUrl: exactImage.isNotEmpty
+            ? exactImage
+            : 'https://picsum.photos/200',
         isAnalyzing: false,
         sellers: sellers,
         priceHistory: [lowestPrice],
@@ -296,15 +392,9 @@ class TargetProductsViewModel extends ChangeNotifier {
     } catch (e) {
       final index = _products.indexWhere((p) => p.id == id);
       if (index != -1) {
-        final errorStr = e.toString().toLowerCase();
-        String displayError = 'حدث خطأ: ${e.toString()}';
-        if (errorStr.contains('socketexception') || errorStr.contains('host lookup') || errorStr.contains('timeout')) {
-          displayError = 'يرجى التحقق من اتصالك بالإنترنت!';
-        }
-
         _products[index] = _products[index].copyWith(
           isAnalyzing: false,
-          error: displayError,
+          error: 'حدث خطأ: ${e.toString()}',
         );
         notifyListeners();
       }
@@ -346,17 +436,18 @@ class TargetProductsViewModel extends ChangeNotifier {
     if (notificationsViewModel != null) {
       notificationsViewModel!.addNotification(
         title: '🎯 هدف محقق: ${product.storeName}',
-        body: 'أبشر! نزل سعر "${product.title}" لـ ${product.currentPrice.toStringAsFixed(2)} ريال وهو أقل من هدفك (${product.targetPrice.toStringAsFixed(2)} ريال).',
+        body:
+            'أبشر! نزل سعر "${product.title}" لـ ${product.currentPrice.toStringAsFixed(2)} ريال وهو أقل من هدفك (${product.targetPrice.toStringAsFixed(2)} ريال).',
       );
     }
   }
 
   Future<void> refreshAllProducts() async {
     if (_products.isEmpty || _isRefreshing) return;
-    
+
     _isRefreshing = true;
     notifyListeners();
-    
+
     final googleShopping = GoogleShoppingService();
     final scraper = PriceScraperService();
     debugPrint('Starting batch refresh for ${_products.length} products...');
@@ -366,13 +457,17 @@ class TargetProductsViewModel extends ChangeNotifier {
       try {
         // HYBRID: Step 1 — scrape original URL for exact title, Step 2 — Google Shopping
         final uri = Uri.tryParse(old.originalUrl.trim());
-        final isUrl = uri != null && uri.hasScheme && uri.scheme.startsWith('http');
+        final isUrl =
+            uri != null && uri.hasScheme && uri.scheme.startsWith('http');
 
         String searchQuery = old.title; // default: use existing title
         String refreshedImage = old.imageUrl;
 
         // Step 1: re-scrape for an up-to-date title (only for known URL products)
-        if (isUrl && old.title.isNotEmpty && old.title != 'منتج' && old.title != 'جاري التحليل الذكي...') {
+        if (isUrl &&
+            old.title.isNotEmpty &&
+            old.title != 'منتج' &&
+            old.title != 'جاري التحليل الذكي...') {
           // We already have the title from initial fetch — reuse it for Google Shopping
           searchQuery = old.title;
         }
@@ -385,7 +480,9 @@ class TargetProductsViewModel extends ChangeNotifier {
 
         // Fallback: re-scrape the URL if Google Shopping returned nothing
         if (lowestPrice <= 0 && isUrl) {
-          final scraperResult = await scraper.scrapeProductInfo(old.originalUrl);
+          final scraperResult = await scraper.scrapeProductInfo(
+            old.originalUrl,
+          );
           lowestPrice = (scraperResult['price'] as num?)?.toDouble() ?? 0.0;
           if (scraperResult['image']?.toString().isNotEmpty == true) {
             refreshedImage = scraperResult['image'].toString();
@@ -397,18 +494,22 @@ class TargetProductsViewModel extends ChangeNotifier {
           if (gsResult['sellers'] != null && gsResult['sellers'] is List) {
             for (var s in gsResult['sellers']) {
               if (s is Map && s['name'] != null && s['price'] != null) {
-                refreshedSellers.add(ProductSeller(
-                  name: s['name'].toString(),
-                  price: (s['price'] as num).toDouble(),
-                ));
+                refreshedSellers.add(
+                  ProductSeller(
+                    name: s['name'].toString(),
+                    price: (s['price'] as num).toDouble(),
+                  ),
+                );
               }
             }
           }
           if (refreshedSellers.isEmpty) {
-            refreshedSellers.add(ProductSeller(
-              name: gsResult['store']?.toString() ?? old.storeName,
-              price: lowestPrice,
-            ));
+            refreshedSellers.add(
+              ProductSeller(
+                name: gsResult['store']?.toString() ?? old.storeName,
+                price: lowestPrice,
+              ),
+            );
           }
 
           refreshedSellers.sort((a, b) => a.price.compareTo(b.price));
@@ -439,7 +540,7 @@ class TargetProductsViewModel extends ChangeNotifier {
         debugPrint('Error refreshing product ${old.id}: $e');
       }
     }
-    
+
     _isRefreshing = false;
     await _saveToStorage();
     notifyListeners();
@@ -464,13 +565,13 @@ class TargetProductsViewModel extends ChangeNotifier {
       _products.addAll(imported);
       await _saveToStorage();
       notifyListeners();
-      
+
       NotificationService().showNotification(
         id: 104,
         title: '📥 استيراد الملف',
         body: 'تم استيراد ${imported.length} منتج جديد بنجاح.',
       );
-      
+
       return true;
     } catch (e) {
       debugPrint('Import error: $e');
