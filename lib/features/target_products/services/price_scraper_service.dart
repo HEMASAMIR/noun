@@ -327,6 +327,10 @@ class PriceScraperService {
         }
       },
       onReceivedError: (controller, request, error) {
+        // ✅ تجاهل أخطاء الـ sub-resources (صور، فيديوهات، CDN، إلخ)
+        // نتدخل بس لو الخطأ في الصفحة الرئيسية نفسها
+        if (request.isForMainFrame != true) return;
+
         if (!completer.isCompleted) {
           completer.complete({
             'price': 0.0,
@@ -586,6 +590,77 @@ class PriceScraperService {
     }
     if (foundPrices.isEmpty) return 0.0;
     return _processPricesToLowest(foundPrices, sellersList, storePrefix);
+  }
+
+  /// نسخة HTTP فقط — للاستخدام من Workmanager بدون WebView
+  Future<Map<String, dynamic>> scrapeWithHttpOnly(String url) async {
+    try {
+      final uri = Uri.tryParse(url.trim());
+      if (uri == null || !uri.hasScheme || !uri.scheme.startsWith('http')) {
+        return {'price': 0.0, 'title': 'رابط غير صالح', 'image': '', 'store': 'غير معروف', 'sellers': []};
+      }
+      final host = uri.host.toLowerCase();
+      String storeName = host.contains('noon.com')
+          ? 'نون'
+          : host.contains('amazon.sa')
+              ? 'أمازون السعودية'
+              : host.replaceAll('www.', '');
+
+      final response = await http
+          .get(uri, headers: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+            'Accept-Language': 'ar,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml',
+          })
+          .timeout(const Duration(seconds: 25));
+
+      final document = parse(response.body);
+
+      // 1. meta product:price:amount
+      final metaPrice = document.querySelector('meta[property="product:price:amount"]');
+      double price = metaPrice != null ? (double.tryParse(metaPrice.attributes['content'] ?? '') ?? 0.0) : 0.0;
+
+      // 2. JSON-LD
+      if (price <= 0) {
+        for (var script in document.querySelectorAll('script[type="application/ld+json"]')) {
+          try {
+            final d = jsonDecode(script.innerHtml);
+            final items = d is List ? d : [d];
+            for (var item in items) {
+              final offers = item['offers'];
+              if (offers != null) {
+                final offerList = offers is List ? offers : [offers];
+                for (var o in offerList) {
+                  final p = double.tryParse(o['price']?.toString() ?? '') ?? 0.0;
+                  if (p > 0) { price = p; break; }
+                }
+              }
+              if (price > 0) break;
+            }
+          } catch (_) {}
+          if (price > 0) break;
+        }
+      }
+
+      // 3. regex fallback
+      if (price <= 0) {
+        price = _parseGenericRegexPrice(response.body, [], storeName);
+      }
+
+      final title = document.querySelector('meta[property="og:title"]')?.attributes['content'] ??
+          document.querySelector('title')?.text.trim() ?? '';
+      final image = document.querySelector('meta[property="og:image"]')?.attributes['content'] ?? '';
+
+      return {
+        'price': price,
+        'title': title.isNotEmpty ? title : 'منتج',
+        'image': image,
+        'store': storeName,
+        'sellers': price > 0 ? [{'name': storeName, 'price': price}] : [],
+      };
+    } catch (e) {
+      return {'price': 0.0, 'title': 'خطأ في الجلب', 'image': '', 'store': 'غير معروف', 'sellers': []};
+    }
   }
 
   double _extractNumber(String text) {

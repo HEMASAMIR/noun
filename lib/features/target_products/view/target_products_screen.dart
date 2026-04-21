@@ -137,20 +137,35 @@ class _TargetProductsViewState extends State<_TargetProductsView>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          RefreshIndicator(
-            onRefresh: () => viewModel.refreshAllProducts(),
-            child: _buildTabContent(viewModel.reachedTargetProducts, showAddButton: false),
+          // ── Refresh Banner ──────────────────────────────────────────────
+          AnimatedSize(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            child: viewModel.isRefreshing
+                ? _RefreshBanner()
+                : const SizedBox.shrink(),
           ),
-          RefreshIndicator(
-            onRefresh: () => viewModel.refreshAllProducts(),
-            child: _buildTabContent(viewModel.processingProducts, showAddButton: false),
-          ),
-          RefreshIndicator(
-            onRefresh: () => viewModel.refreshAllProducts(),
-            child: _buildTabContent(viewModel.allProducts, showAddButton: true),
+          // ── Tab Content ─────────────────────────────────────────────────
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                RefreshIndicator(
+                  onRefresh: () => viewModel.refreshAllProducts(),
+                  child: _buildTabContent(viewModel.reachedTargetProducts, showAddButton: false),
+                ),
+                RefreshIndicator(
+                  onRefresh: () => viewModel.refreshAllProducts(),
+                  child: _buildTabContent(viewModel.processingProducts, showAddButton: false),
+                ),
+                RefreshIndicator(
+                  onRefresh: () => viewModel.refreshAllProducts(),
+                  child: _buildTabContent(viewModel.allProducts, showAddButton: true),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -169,7 +184,11 @@ class _TargetProductsViewState extends State<_TargetProductsView>
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: products.length,
             itemBuilder: (context, index) {
-              return ProductCard(product: products[index]);
+              return ProductCard(
+                key: ValueKey(products[index].id),
+                product: products[index],
+              );
+
             },
           ),
         ),
@@ -276,6 +295,120 @@ class _TargetProductsViewState extends State<_TargetProductsView>
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Refresh Banner Widget ────────────────────────────────────────────────────
+
+class _RefreshBanner extends StatefulWidget {
+  @override
+  State<_RefreshBanner> createState() => _RefreshBannerState();
+}
+
+class _RefreshBannerState extends State<_RefreshBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin;
+
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<TargetProductsViewModel>();
+
+    final int checked = vm.refreshCheckedCount;
+    final int total   = vm.refreshTotalCount;
+    final String name = vm.refreshCurrentName;
+
+    final double progress = total > 0 ? checked / total : 0.0;
+    final int pct = (progress * 100).round();
+
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFFFFBEB),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // أيقونة دوارة
+                RotationTransition(
+                  turns: _spin,
+                  child: const Icon(Icons.sync, color: Color(0xFFF59E0B), size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // العنوان + العداد + النسبة
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'الفحص الدوري',
+                              style: TextStyle(
+                                color: Color(0xFF92400E),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '$checked/$total ($pct%)',
+                            style: const TextStyle(
+                              color: Color(0xFF92400E),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // اسم المنتج الحالي
+                      if (name.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'جاري الفحص (على: $name)',
+                          style: const TextStyle(
+                            color: Color(0xFFB45309),
+                            fontSize: 11.5,
+                            fontStyle: FontStyle.italic,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // شريط تقدم محدد القيمة
+          LinearProgressIndicator(
+            value: progress > 0 ? progress : null,
+            minHeight: 4,
+            backgroundColor: const Color(0xFFFDE68A),
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFF59E0B)),
+          ),
+        ],
       ),
     );
   }

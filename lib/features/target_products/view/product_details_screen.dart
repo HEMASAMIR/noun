@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../model/product_model.dart';
 import '../viewmodel/target_products_viewmodel.dart';
+import '../widgets/share_product_sheet.dart';
 
 class ProductDetailsScreen extends StatelessWidget {
   final ProductModel product;
@@ -21,6 +21,11 @@ class ProductDetailsScreen extends StatelessWidget {
         backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            onPressed: () => ShareProductSheet.show(context, product),
+            tooltip: 'مشاركة المنتج',
+          ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () {
@@ -89,22 +94,18 @@ class ProductDetailsScreen extends StatelessWidget {
             const SizedBox(height: 12),
             _buildDetailRow(Icons.local_shipping, 'نوع التوصيل', _getDeliveryTypeName(product.deliveryType)),
             const SizedBox(height: 12),
-            _buildDetailRow(Icons.people, 'عدد المتابعين للسعر', '${product.watchers} مستخدمين'),
-            const SizedBox(height: 12),
             _buildDetailRow(Icons.link, 'الرابط الأصلي', product.originalUrl, isLink: true),
             const SizedBox(height: 32),
             
           const SizedBox(height: 32),
-          
+
           ElevatedButton.icon(
-            onPressed: () {
-              Share.share(
-                'شاهد هذا المنتج على Wasfy: ${product.title}\nالسعر الحالي: ${product.currentPrice} ريال\nالرابط: ${product.originalUrl}',
-                subject: 'مشاركة منتج من تطبيق Wasfy',
-              );
-            },
-            icon: const Icon(Icons.share, color: Colors.white),
-            label: const Text('مشاركة المنتج مع الأصدقاء', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
+            onPressed: () => ShareProductSheet.show(context, product),
+            icon: const Icon(Icons.share_rounded, color: Colors.white),
+            label: const Text(
+              'مشاركة المنتج مع الأصدقاء',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.info,
               padding: const EdgeInsets.symmetric(vertical: 16),

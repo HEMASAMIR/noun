@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import 'dart:convert';
 import '../model/product_model.dart';
 import '../../notifications/viewmodel/notifications_viewmodel.dart';
@@ -24,8 +25,28 @@ class TargetProductsViewModel extends ChangeNotifier {
   final List<ProductModel> _products = [];
   static const String _storageKey = 'target_products_cache';
 
+  Timer? _periodicTimer;
+
   bool _isRefreshing = false;
   bool get isRefreshing => _isRefreshing;
+
+  // تقدم الفحص الدوري
+  int _refreshCheckedCount = 0;
+  int _refreshTotalCount = 0;
+  String _refreshCurrentName = '';
+
+  int get refreshCheckedCount => _refreshCheckedCount;
+  int get refreshTotalCount => _refreshTotalCount;
+  String get refreshCurrentName => _refreshCurrentName;
+
+  // آخر منتج اتحدث (عشان الأنيميشن)
+  List<String> _lastUpdatedIds = [];
+  List<String> get lastUpdatedIds => _lastUpdatedIds;
+  Timer? _lastUpdatedClearTimer;
+
+  // المنتجات الجاري تحديثها حاليا
+  List<String> _currentlyRefreshingIds = [];
+  List<String> get currentlyRefreshingIds => _currentlyRefreshingIds;
 
   ProductSortOption _currentSortOption = ProductSortOption.newest;
   DeliveryType? _currentDeliveryFilter;
@@ -130,6 +151,32 @@ class TargetProductsViewModel extends ChangeNotifier {
 
   TargetProductsViewModel({this.notificationsViewModel});
 
+  /// يبدأ تايمر foreground بالوقت المحدد من الإعدادات
+  void startPeriodicTimer(Duration interval) {
+    _periodicTimer?.cancel();
+    _periodicTimer = Timer.periodic(interval, (_) {
+      debugPrint(
+        '[ForegroundTimer] Triggering refresh after ${interval.inMinutes} min',
+      );
+      refreshAllProducts();
+    });
+    debugPrint(
+      '[ForegroundTimer] Started with interval: ${interval.inSeconds}s',
+    );
+  }
+
+  void stopPeriodicTimer() {
+    _periodicTimer?.cancel();
+    _periodicTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _periodicTimer?.cancel();
+    _lastUpdatedClearTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> loadFromStorage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -177,6 +224,13 @@ class TargetProductsViewModel extends ChangeNotifier {
     _products.insert(0, placeholder);
     notifyListeners();
     await _saveToStorage();
+
+    // إشعار بدء التحليل
+    notificationsViewModel?.addNotification(
+      title: '⏳ جاري تحليل منتج جديد',
+      body:
+          'نحن نجمع بيانات المنتج وأفضل الأسعار المتاحة... سنخطرك عند اكتمال التحليل.',
+    );
 
     // 2. Perform fetching in background (Google Shopping first)
     _scrapeAndPopulateProduct(id, url, targetPrice);
@@ -361,6 +415,11 @@ class TargetProductsViewModel extends ChangeNotifier {
         );
         notifyListeners();
         await _saveToStorage();
+        notificationsViewModel?.addNotification(
+          title: '⚠️ تعذر تحليل المنتج',
+          body:
+              'لم نتمكن من جلب بيانات هذا المنتج. تحقق من صحة الرابط وحاول مرة أخرى.',
+        );
         return;
       }
 
@@ -388,6 +447,13 @@ class TargetProductsViewModel extends ChangeNotifier {
 
       if (_products[index].hasReachedTarget) {
         _triggerNotification(_products[index]);
+      } else {
+        // إشعار نجاح الإضافة
+        notificationsViewModel?.addNotification(
+          title: '✅ تمت إضافة المنتج',
+          body:
+              'تمت إضافة "${_products[index].title}" بنجاح. السعر الحالي: ${lowestPrice.toStringAsFixed(2)} ريال. سنخطرك عند الوصول للسعر المستهدف ⁠(${finalTargetPrice.toStringAsFixed(2)} ريال).',
+        );
       }
     } catch (e) {
       final index = _products.indexWhere((p) => p.id == id);
@@ -440,110 +506,220 @@ class TargetProductsViewModel extends ChangeNotifier {
             'أبشر! نزل سعر "${product.title}" لـ ${product.currentPrice.toStringAsFixed(2)} ريال وهو أقل من هدفك (${product.targetPrice.toStringAsFixed(2)} ريال).',
       );
     }
+    
+    NotificationService().showNotification(
+      id: product.id.hashCode,
+      title: '🎯 هدف محقق!',
+      body:
+          'أبشر! نزل سعر "${product.title}" لـ ${product.currentPrice.toStringAsFixed(2)} ريال وهو أقل من هدفك.',
+    );
   }
 
   Future<void> refreshAllProducts() async {
     if (_products.isEmpty || _isRefreshing) return;
 
     _isRefreshing = true;
+    _refreshCheckedCount = 0;
+    _refreshTotalCount = _products.length;
+    _refreshCurrentName = '';
     notifyListeners();
 
-    final googleShopping = GoogleShoppingService();
-    final scraper = PriceScraperService();
-    debugPrint('Starting batch refresh for ${_products.length} products...');
+    debugPrint(
+      'Starting SEQUENTIAL refresh for ${_products.length} products...',
+    );
+    int updatedCount = 0;
+    int reachedTargetCount = 0;
+    const int _progressNotifId = 997;
 
-    for (int i = 0; i < _products.length; i++) {
-      final old = _products[i];
-      try {
-        // HYBRID: Step 1 — scrape original URL for exact title, Step 2 — Google Shopping
-        final uri = Uri.tryParse(old.originalUrl.trim());
-        final isUrl =
-            uri != null && uri.hasScheme && uri.scheme.startsWith('http');
+    // 🔔 إشعار بدء الفحص
+    await NotificationService().showProgressNotification(
+      id: _progressNotifId,
+      current: 0,
+      total: _products.length,
+      currentProductName: '',
+    );
 
-        String searchQuery = old.title; // default: use existing title
-        String refreshedImage = old.imageUrl;
+    try {
+      // ✅ نسخة من الـ IDs عشان الـ loop لا تتأثر بإعادة الترتيب
+      final ids = _products.map((p) => p.id).toList();
+      int loopCount = 0;
 
-        // Step 1: re-scrape for an up-to-date title (only for known URL products)
-        if (isUrl &&
-            old.title.isNotEmpty &&
-            old.title != 'منتج' &&
-            old.title != 'جاري التحليل الذكي...') {
-          // We already have the title from initial fetch — reuse it for Google Shopping
-          searchQuery = old.title;
+      final prefs = await SharedPreferences.getInstance();
+      final int batchSize = prefs.getInt('concurrent_products') ?? 2;
+
+      for (int i = 0; i < ids.length; i += batchSize) {
+        final batchIds = ids.sublist(i, (i + batchSize > ids.length) ? ids.length : i + batchSize);
+        
+        List<String> currentNames = [];
+        List<Future<ProductModel?>> futures = [];
+        List<ProductModel> oldBatchProducts = [];
+
+        for (final id in batchIds) {
+          final currentIndex = _products.indexWhere((p) => p.id == id);
+          if (currentIndex == -1) continue;
+
+          final old = _products[currentIndex];
+          oldBatchProducts.add(old);
+          
+          String shortName = old.title.length > 20
+              ? '${old.title.substring(0, 20)}...'
+              : old.title;
+          currentNames.add(shortName);
+
+          futures.add(_refreshSingleProduct(old));
         }
 
-        // Step 2: Google Shopping with exact title
-        final gsResult = await googleShopping.searchLowestPrice(searchQuery);
-        final double gsPrice = (gsResult['price'] as num?)?.toDouble() ?? 0.0;
+        if (futures.isEmpty) continue;
 
-        double lowestPrice = gsPrice;
+        _refreshCurrentName = currentNames.join(' و ');
 
-        // Fallback: re-scrape the URL if Google Shopping returned nothing
-        if (lowestPrice <= 0 && isUrl) {
-          final scraperResult = await scraper.scrapeProductInfo(
-            old.originalUrl,
-          );
-          lowestPrice = (scraperResult['price'] as num?)?.toDouble() ?? 0.0;
-          if (scraperResult['image']?.toString().isNotEmpty == true) {
-            refreshedImage = scraperResult['image'].toString();
-          }
-        }
+        // 🔔 تحديث إشعار التقدم في الخلفية
+        await NotificationService().showProgressNotification(
+          id: _progressNotifId,
+          current: loopCount,
+          total: _products.length,
+          currentProductName: _refreshCurrentName,
+        );
 
-        if (lowestPrice > 0) {
-          List<ProductSeller> refreshedSellers = [];
-          if (gsResult['sellers'] != null && gsResult['sellers'] is List) {
-            for (var s in gsResult['sellers']) {
-              if (s is Map && s['name'] != null && s['price'] != null) {
-                refreshedSellers.add(
-                  ProductSeller(
-                    name: s['name'].toString(),
-                    price: (s['price'] as num).toDouble(),
-                  ),
-                );
-              }
+        _currentlyRefreshingIds = batchIds.toList();
+        notifyListeners();
+
+        final results = await Future.wait(futures);
+
+        _currentlyRefreshingIds.clear();
+        loopCount += futures.length;
+        _refreshCheckedCount = loopCount;
+        
+        _lastUpdatedClearTimer?.cancel();
+        _lastUpdatedIds.clear();
+
+        for (int j = 0; j < results.length; j++) {
+          final updated = results[j];
+          if (updated != null) {
+            final old = oldBatchProducts[j];
+            // ✅ أزّل من مكانه الحالي وحطه في الأول
+            final idx = _products.indexWhere((p) => p.id == updated.id);
+            if (idx != -1) {
+              _products.removeAt(idx);
+              _products.insert(0, updated);
+            }
+
+            if (updated.currentPrice > 0) updatedCount++;
+
+            // 🟢 فلاش للمنتج اللي اتحدث
+            _lastUpdatedIds.add(updated.id);
+
+            if (updated.hasReachedTarget && !old.hasReachedTarget) {
+              reachedTargetCount++;
+              _triggerNotification(updated);
             }
           }
-          if (refreshedSellers.isEmpty) {
+        }
+        
+        if (_lastUpdatedIds.isNotEmpty) {
+          _lastUpdatedClearTimer = Timer(
+            const Duration(milliseconds: 2500),
+            () {
+              _lastUpdatedIds.clear();
+              notifyListeners();
+            },
+          );
+        }
+        notifyListeners();
+      }
+
+      await _saveToStorage();
+
+      // إلغاء إشعار التقدم وإظهار النتيجة النهائية
+      await NotificationService().dismissNotification(_progressNotifId);
+
+      String summaryTitle = '✅ اكتمل الفحص الدوري';
+      String summaryBody = 'تم فحص ${_products.length} منتجات.';
+      if (reachedTargetCount > 0) {
+        summaryBody += '\n🎯 $reachedTargetCount منتج وصل للسعر المستهدف!';
+      }
+
+      await NotificationService().showNotification(
+        id: 998,
+        title: summaryTitle,
+        body: summaryBody,
+      );
+
+      notificationsViewModel?.addNotification(
+        title: summaryTitle,
+        body: summaryBody,
+      );
+    } finally {
+      _currentlyRefreshingIds.clear();
+      _isRefreshing = false;
+      _refreshCheckedCount = 0;
+      _refreshTotalCount = 0;
+      _refreshCurrentName = '';
+      notifyListeners();
+    }
+  }
+
+  /// يحدّث منتج واحد ويرجع النسخة الجديدة أو null لو فشل
+  Future<ProductModel?> _refreshSingleProduct(ProductModel old) async {
+    if (old.isAnalyzing) return null;
+
+    try {
+      final uri = Uri.tryParse(old.originalUrl.trim());
+      final isUrl =
+          uri != null && uri.hasScheme && uri.scheme.startsWith('http');
+      if (!isUrl) return old.copyWith(lastChecked: DateTime.now());
+
+      final scraper = PriceScraperService();
+      final result = await scraper.scrapeProductInfo(old.originalUrl);
+      final double lowestPrice = (result['price'] as num?)?.toDouble() ?? 0.0;
+      final String refreshedImage = result['image']?.toString() ?? '';
+
+      if (lowestPrice <= 0) return old.copyWith(lastChecked: DateTime.now());
+
+      List<ProductSeller> refreshedSellers = [];
+      if (result['sellers'] is List) {
+        for (var s in result['sellers']) {
+          if (s is Map && s['name'] != null && s['price'] != null) {
             refreshedSellers.add(
               ProductSeller(
-                name: gsResult['store']?.toString() ?? old.storeName,
-                price: lowestPrice,
+                name: s['name'].toString(),
+                price: (s['price'] as num).toDouble(),
               ),
             );
           }
-
-          refreshedSellers.sort((a, b) => a.price.compareTo(b.price));
-          lowestPrice = refreshedSellers.first.price;
-
-          final newHistory = List<double>.from(old.priceHistory);
-          if (newHistory.isEmpty || newHistory.last != lowestPrice) {
-            newHistory.add(lowestPrice);
-            if (newHistory.length > 30) newHistory.removeAt(0);
-          }
-
-          _products[i] = old.copyWith(
-            currentPrice: lowestPrice,
-            storeName: gsResult['store']?.toString().isNotEmpty == true
-                ? gsResult['store'].toString()
-                : old.storeName,
-            imageUrl: refreshedImage.isNotEmpty ? refreshedImage : old.imageUrl,
-            sellers: refreshedSellers,
-            priceHistory: newHistory,
-            lastChecked: DateTime.now(),
-          );
-
-          if (_products[i].hasReachedTarget && !old.hasReachedTarget) {
-            _triggerNotification(_products[i]);
-          }
         }
-      } catch (e) {
-        debugPrint('Error refreshing product ${old.id}: $e');
       }
-    }
+      if (refreshedSellers.isEmpty) {
+        refreshedSellers.add(
+          ProductSeller(
+            name: result['store']?.toString() ?? old.storeName,
+            price: lowestPrice,
+          ),
+        );
+      }
+      refreshedSellers.sort((a, b) => a.price.compareTo(b.price));
+      final double finalPrice = refreshedSellers.first.price;
 
-    _isRefreshing = false;
-    await _saveToStorage();
-    notifyListeners();
+      final newHistory = List<double>.from(old.priceHistory);
+      if (newHistory.isEmpty || newHistory.last != finalPrice) {
+        newHistory.add(finalPrice);
+        if (newHistory.length > 30) newHistory.removeAt(0);
+      }
+
+      return old.copyWith(
+        currentPrice: finalPrice,
+        storeName: result['store']?.toString().isNotEmpty == true
+            ? result['store'].toString()
+            : old.storeName,
+        imageUrl: refreshedImage.isNotEmpty ? refreshedImage : old.imageUrl,
+        sellers: refreshedSellers,
+        priceHistory: newHistory,
+        lastChecked: DateTime.now(),
+      );
+    } catch (e) {
+      debugPrint('Error refreshing product ${old.id}: $e');
+      return old.copyWith(lastChecked: DateTime.now());
+    }
   }
 
   String exportToJson() {

@@ -25,6 +25,9 @@ class SettingsViewModel extends ChangeNotifier {
   bool _isDarkMode = false;
   bool _isLoaded = false;
 
+  /// مرجع لـ TargetProductsViewModel لتحديث الـ foreground timer
+  TargetProductsViewModel? targetProductsViewModel;
+
   bool get isForegroundServiceEnabled => _isForegroundServiceEnabled;
   int get selectedConcurrentProducts => _selectedConcurrentProducts;
   double get checkIntervalValue => _checkIntervalValue;
@@ -69,6 +72,11 @@ class SettingsViewModel extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyForegroundService, value);
     await _updateWorkmanagerRegistration();
+    if (!value) {
+      targetProductsViewModel?.stopPeriodicTimer();
+    } else {
+      _restartForegroundTimer();
+    }
     _notifySettingChanged('وضع الخدمة الدائمة', value ? 'مفعل' : 'معطل');
     notifyListeners();
   }
@@ -87,6 +95,7 @@ class SettingsViewModel extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyCheckIntervalValue, value);
     await _updateWorkmanagerRegistration();
+    _restartForegroundTimer(); // ✅ حدّث الـ foreground timer فوراً
     _notifySettingChanged('فترة الفحص', '${value.toInt()} $_checkIntervalUnit');
     notifyListeners();
   }
@@ -96,8 +105,21 @@ class SettingsViewModel extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyCheckIntervalUnit, unit);
     await _updateWorkmanagerRegistration();
+    _restartForegroundTimer(); // ✅ حدّث الـ foreground timer فوراً
     _notifySettingChanged('وحدة الفحص', unit);
     notifyListeners();
+  }
+
+  void _restartForegroundTimer() {
+    if (!_isForegroundServiceEnabled) return;
+    final int v = _checkIntervalValue.toInt().clamp(1, 999);
+    final Duration interval;
+    switch (_checkIntervalUnit) {
+      case 'دقائق': interval = Duration(minutes: v); break;
+      case 'أيام':  interval = Duration(days: v); break;
+      default:      interval = Duration(hours: v);
+    }
+    targetProductsViewModel?.startPeriodicTimer(interval);
   }
 
   void _notifySettingChanged(String settingName, String newValue) {

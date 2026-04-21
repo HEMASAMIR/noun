@@ -26,12 +26,36 @@ void callbackDispatcher() {
       await notifications.init();
       
       bool updatedSomething = false;
+      int reachedCount = 0;
+      const int progressNotifId = 997;
+      int loopIdx = 0;
+
+      // 🔔 إشعار بدء فحص الخلفية
+      await notifications.showProgressNotification(
+        id: progressNotifId,
+        current: 0,
+        total: products.length,
+        currentProductName: '',
+      );
 
       for (var product in products) {
         if (product.isAnalyzing) continue;
 
+        final shortName = product.title.length > 30
+            ? '${product.title.substring(0, 30)}...'
+            : product.title;
+
+        await notifications.showProgressNotification(
+          id: progressNotifId,
+          current: loopIdx,
+          total: products.length,
+          currentProductName: shortName,
+        );
+        loopIdx++;
+
         try {
-          final result = await scraper.scrapeProductInfo(product.originalUrl);
+          // ✅ HTTP فقط — WebView مبيشتغلش في Workmanager background isolate
+          final result = await scraper.scrapeWithHttpOnly(product.originalUrl);
           if (result != null && result['price'] != null) {
             List<ProductSeller> sellers = [];
             if (result['sellers'] != null && result['sellers'] is List) {
@@ -52,8 +76,10 @@ void callbackDispatcher() {
             final double lowestPrice = sellers.isNotEmpty ? sellers.first.price : mainPrice;
 
             if (lowestPrice <= product.targetPrice && (product.currentPrice > product.targetPrice || product.currentPrice == 0)) {
+              reachedCount++;
               final title = '🎉 مبروك! وصل سعرك المفضل للهدف';
-              final body = 'المنتج "${_shortenTitle(product.title)}" متاح الآن بسعر ${lowestPrice.toStringAsFixed(2)} ريال في موقع ${product.storeName}. اطلبه الآن قبل نفاذ الكمية!';
+              final body = 'المنتج \"${_shortenTitle(product.title)}\" متاح الآن بسعر ${lowestPrice.toStringAsFixed(2)} ريال في موقع ${product.storeName}. اطلبه الآن!';
+
               
               await notifications.showNotification(
                 id: product.id.hashCode,
@@ -82,20 +108,23 @@ void callbackDispatcher() {
         }
       }
 
+      // إلغاء إشعار التقدم
+      await notifications.dismissNotification(progressNotifId);
+
       if (updatedSomething) {
-        final updatedJsonList = products.map((p) => jsonEncode(p.toJson())).toList();
-        await prefs.setStringList('tracked_products', updatedJsonList);
-        await prefs.setString('last_periodic_check', DateTime.now().toIso8601String());
-        
-        final title = '🔄 تحديث دوري مكتمل';
-        final body = 'تم الانتهاء من فحص الأسعار لجميع المنتجات المتابعة بنجاح.';
-        
+        // إشعار نهائي
+        final String summaryTitle = '✅ اكتمل الفحص الدوري';
+        final StringBuffer sb = StringBuffer();
+        sb.write('تم فحص ${products.length} منتجات.');
+        if (reachedCount > 0) sb.write('\n🎯 $reachedCount منتج وصل للسعر المستهدف!');
+        final String summaryBody = sb.toString();
+
         await notifications.showNotification(
           id: 999,
-          title: title,
-          body: body,
+          title: summaryTitle,
+          body: summaryBody,
         );
-        await _saveNotificationToHistory(title, body);
+        await _saveNotificationToHistory(summaryTitle, summaryBody);
       }
 
       return true;

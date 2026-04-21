@@ -5,95 +5,215 @@ import 'package:wasfy/features/target_products/viewmodel/target_products_viewmod
 import '../../../core/theme/app_colors.dart';
 import '../model/product_model.dart';
 import '../view/product_details_screen.dart';
+import 'share_product_sheet.dart';
 
-class ProductCard extends StatelessWidget {
+class ProductCard extends StatefulWidget {
   final ProductModel product;
 
   const ProductCard({super.key, required this.product});
 
   @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        GestureDetector(
-          onTap: () {
-            HapticFeedback.lightImpact();
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ProductDetailsScreen(product: product),
-              ),
-            );
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border.withOpacity(0.3)),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withOpacity(
-                    product.isAnalyzing ? 0.15 : 0.05,
-                  ),
-                  blurRadius: product.isAnalyzing ? 15 : 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // الجزء الأيسر: الصورة والسعر المستهدف
-                    _buildImageSection(),
-                    const SizedBox(width: 16),
-                    // الجزء الأيمن: التفاصيل
-                    _buildDetailsSection(),
-                  ],
-                ),
-                // جديد: عرض قائمة أفضل البائعين
-                if (!product.isAnalyzing && product.sellers.isNotEmpty)
-                  _buildSellersList(),
-              ],
-            ),
-          ),
-        ),
-        _buildDeleteButton(context),
-      ],
+  State<ProductCard> createState() => _ProductCardState();
+}
+
+class _ProductCardState extends State<ProductCard>
+    with TickerProviderStateMixin {
+  late AnimationController _flashCtrl;
+  late Animation<double> _flashAnim;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
+  String? _lastWatchedId;
+
+  @override
+  void initState() {
+    super.initState();
+    _flashCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _flashAnim = CurvedAnimation(parent: _flashCtrl, curve: Curves.easeOut);
+
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.03).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
   }
 
-  Widget _buildImageSection() {
+  @override
+  void didUpdateWidget(ProductCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // لو المنتج ده اتحدث دلوقتي، ابدأ الفلاش
+    final vm = context.read<TargetProductsViewModel>();
+    if (vm.lastUpdatedIds.contains(widget.product.id) && _lastWatchedId != widget.product.id) {
+      _lastWatchedId = widget.product.id;
+      _flashCtrl.forward(from: 0).then((_) => _flashCtrl.reverse());
+    }
+
+    final isRefreshing = vm.currentlyRefreshingIds.contains(widget.product.id);
+    if (isRefreshing && !_pulseCtrl.isAnimating) {
+      _pulseCtrl.repeat(reverse: true);
+    } else if (!isRefreshing && _pulseCtrl.isAnimating) {
+      _pulseCtrl.stop();
+      _pulseCtrl.animateTo(0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _flashCtrl.dispose();
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  ProductModel get product => widget.product;
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.read<TargetProductsViewModel>();
+    final isRefreshing = vm.currentlyRefreshingIds.contains(product.id) || product.isAnalyzing;
+
+    return AnimatedBuilder(
+      animation: Listenable.merge([_flashCtrl, _pulseCtrl]),
+      builder: (context, child) {
+        final double flash = _flashAnim.value;
+        final double scale = _pulseAnim.value;
+
+        return Transform.scale(
+          scale: scale,
+          child: Stack(
+          children: [
+            // الإشعاع الأخضر خلف الكارت
+            if (flash > 0)
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.success.withOpacity(flash * 0.35),
+                          blurRadius: 18,
+                          spreadRadius: 3,
+                        ),
+                      ],
+                      border: Border.all(
+                        color: AppColors.success.withOpacity(flash),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProductDetailsScreen(product: product),
+                  ),
+                );
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: flash > 0
+                      ? Color.lerp(AppColors.surface, AppColors.successBg, flash * 0.6)!
+                      : (isRefreshing ? const Color(0xFFFFFBEB) : AppColors.surface),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: isRefreshing ? Colors.orange : AppColors.border.withOpacity(0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isRefreshing ? Colors.orange.withOpacity(0.3) : AppColors.primary.withOpacity(
+                        product.isAnalyzing ? 0.15 : 0.05,
+                      ),
+                      blurRadius: isRefreshing ? 20 : (product.isAnalyzing ? 15 : 10),
+                      spreadRadius: isRefreshing ? 2 : 0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildImageSection(isRefreshing),
+                        const SizedBox(width: 16),
+                        _buildDetailsSection(isRefreshing),
+                      ],
+                    ),
+                    if (!product.isAnalyzing && !isRefreshing && product.sellers.isNotEmpty)
+                      _buildSellersList(),
+                  ],
+                ),
+              ),
+            ),
+            _buildDeleteButton(context),
+            // بادج "تم التحديث"
+            if (flash > 0.3)
+              Positioned(
+                top: 10,
+                right: 20,
+                child: Opacity(
+                  opacity: (flash - 0.3) / 0.7,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.success,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.white, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'تم التحديث',
+                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildImageSection(bool isRefreshing) {
     return Column(
       children: [
-        Hero(
-          tag: 'product_image_${product.id}',
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border.withOpacity(0.5)),
-            ),
-            child: product.isAnalyzing
-                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                : product.imageUrl.isNotEmpty
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(product.imageUrl, fit: BoxFit.cover),
-                  )
-                : const Icon(
-                    Icons.storefront,
-                    size: 40,
-                    color: AppColors.textLight,
-                  ),
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border.withOpacity(0.5)),
           ),
+          child: product.isAnalyzing || isRefreshing
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
+              : product.imageUrl.isNotEmpty
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(product.imageUrl, fit: BoxFit.cover),
+                )
+              : const Icon(
+                  Icons.storefront,
+                  size: 40,
+                  color: AppColors.textLight,
+                ),
         ),
         const SizedBox(height: 8),
         Container(
@@ -115,7 +235,7 @@ class ProductCard extends StatelessWidget {
     );
   }
 
-  Widget _buildDetailsSection() {
+  Widget _buildDetailsSection(bool isRefreshing) {
     return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -133,14 +253,24 @@ class ProductCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          if (product.isAnalyzing)
-            const Text(
-              'جاري التحليل الذكي...',
-              style: TextStyle(
-                color: AppColors.primary,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-              ),
+          if (product.isAnalyzing || isRefreshing)
+            Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  product.isAnalyzing ? 'جاري التحليل الذكي...' : 'جاري فحص السعر الآن...',
+                  style: const TextStyle(
+                    color: Colors.orange,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             )
           else if (product.error != null)
             Text(
@@ -194,7 +324,7 @@ class ProductCard extends StatelessWidget {
               const SizedBox(width: 12),
               _infoItem(Icons.groups_outlined, '${product.sellers.length}'),
               const SizedBox(width: 12),
-              _infoItem(Icons.access_time, _formatTimeAdded(product.timeAdded)),
+              _infoItem(Icons.access_time, _formatLastChecked(product.lastChecked ?? product.timeAdded)),
             ],
           ),
         ],
@@ -326,7 +456,26 @@ class ProductCard extends StatelessWidget {
     );
   }
 
-  String _formatTimeAdded(DateTime time) {
+  // Widget _buildShareButton(BuildContext context) {
+  //   return Positioned(
+  //     left: 52,
+  //     top: 12,
+  //     child: IconButton(
+  //       icon: const Icon(
+  //         Icons.share_rounded,
+  //         color: AppColors.primary,
+  //         size: 20,
+  //       ),
+  //       tooltip: 'مشاركة',
+  //       onPressed: () {
+  //         HapticFeedback.lightImpact();
+  //         ShareProductSheet.show(context, product);
+  //       },
+  //     ),
+  //   );
+  // }
+
+  String _formatLastChecked(DateTime time) {
     final diff = DateTime.now().difference(time);
     if (diff.inDays > 0) return 'منذ ${diff.inDays} ي';
     if (diff.inHours > 0) return 'منذ ${diff.inHours} س';

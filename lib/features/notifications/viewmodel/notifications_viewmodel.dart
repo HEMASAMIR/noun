@@ -95,6 +95,14 @@ class NotificationsViewModel extends ChangeNotifier {
     _saveToStorage();
   }
 
+  void removeNotification(int index) {
+    if (index >= 0 && index < _notifications.length) {
+      _notifications.removeAt(index);
+      notifyListeners();
+      _saveToStorage();
+    }
+  }
+
   void clearAll() {
     _notifications.clear();
     notifyListeners();

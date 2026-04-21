@@ -36,11 +36,48 @@ class NotificationService {
     );
   }
 
+  /// إشعار تقدم حي (يتحدث مع كل منتج)
+  Future<void> showProgressNotification({
+    required int id,
+    required int current,
+    required int total,
+    required String currentProductName,
+  }) async {
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'wasfy_progress_channel',
+      'Wasfy - تقدم الفحص الدوري',
+      channelDescription: 'إشعار مباشر بتقدم الفحص الدوري للمنتجات',
+      importance: Importance.low,
+      priority: Priority.low,
+      showWhen: false,
+      ongoing: true,
+      onlyAlertOnce: true,
+      showProgress: true,
+      maxProgress: total,
+      progress: current,
+      indeterminate: current == 0,
+    );
+
+    final NotificationDetails details = NotificationDetails(android: androidDetails);
+
+    final String body = current == 0
+        ? 'جاري بدء الفحص...'
+        : 'جاري الفحص ($current/$total): $currentProductName';
+
+    await _notificationsPlugin.show(id, '🔄 الفحص الدوري', body, details);
+  }
+
+  /// إلغاء إشعار
+  Future<void> dismissNotification(int id) async {
+    await _notificationsPlugin.cancel(id);
+  }
+
   Future<void> showNotification({
     required int id,
     required String title,
     required String body,
   }) async {
+
     const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
       'wasfy_products_channel',
       'Wasfy - تنبيهات الأسعار',
