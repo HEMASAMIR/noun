@@ -25,7 +25,12 @@ class TargetProductsViewModel extends ChangeNotifier {
   final List<ProductModel> _products = [];
   static const String _storageKey = 'target_products_cache';
 
-  Timer? _periodicTimer;
+  Timer? _countdownTimer;
+  int _secondsUntilNextRefresh = 0;
+  int _maxSecondsForRefresh = 0;
+  
+  int get secondsUntilNextRefresh => _secondsUntilNextRefresh;
+  bool get hasActiveTimer => _countdownTimer != null;
 
   bool _isRefreshing = false;
   bool get isRefreshing => _isRefreshing;
@@ -153,26 +158,36 @@ class TargetProductsViewModel extends ChangeNotifier {
 
   /// يبدأ تايمر foreground بالوقت المحدد من الإعدادات
   void startPeriodicTimer(Duration interval) {
-    _periodicTimer?.cancel();
-    _periodicTimer = Timer.periodic(interval, (_) {
-      debugPrint(
-        '[ForegroundTimer] Triggering refresh after ${interval.inMinutes} min',
-      );
-      refreshAllProducts();
+    _countdownTimer?.cancel();
+    _maxSecondsForRefresh = interval.inSeconds;
+    _secondsUntilNextRefresh = _maxSecondsForRefresh;
+    
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_isRefreshing) return; // Pause countdown while checking
+
+      if (_secondsUntilNextRefresh > 0) {
+        _secondsUntilNextRefresh--;
+        notifyListeners();
+      } else {
+        refreshAllProducts();
+        _secondsUntilNextRefresh = _maxSecondsForRefresh;
+      }
     });
-    debugPrint(
-      '[ForegroundTimer] Started with interval: ${interval.inSeconds}s',
-    );
+
+    debugPrint('[ForegroundTimer] Started with interval: ${interval.inSeconds}s');
+    notifyListeners();
   }
 
   void stopPeriodicTimer() {
-    _periodicTimer?.cancel();
-    _periodicTimer = null;
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _secondsUntilNextRefresh = 0;
+    notifyListeners();
   }
 
   @override
   void dispose() {
-    _periodicTimer?.cancel();
+    _countdownTimer?.cancel();
     _lastUpdatedClearTimer?.cancel();
     super.dispose();
   }
@@ -519,132 +534,114 @@ class TargetProductsViewModel extends ChangeNotifier {
     if (_products.isEmpty || _isRefreshing) return;
 
     _isRefreshing = true;
-    _refreshCheckedCount = 0;
-    _refreshTotalCount = _products.length;
-    _refreshCurrentName = '';
     notifyListeners();
 
-    debugPrint(
-      'Starting SEQUENTIAL refresh for ${_products.length} products...',
-    );
-    int updatedCount = 0;
-    int reachedTargetCount = 0;
-    const int _progressNotifId = 997;
-
-    // 🔔 إشعار بدء الفحص
-    await NotificationService().showProgressNotification(
-      id: _progressNotifId,
-      current: 0,
-      total: _products.length,
-      currentProductName: '',
-    );
-
     try {
-      // ✅ نسخة من الـ IDs عشان الـ loop لا تتأثر بإعادة الترتيب
-      final ids = _products.map((p) => p.id).toList();
-      int loopCount = 0;
-
       final prefs = await SharedPreferences.getInstance();
-      final int batchSize = prefs.getInt('concurrent_products') ?? 2;
+      final int concurrency = prefs.getInt('concurrent_products') ?? 1;
 
-      for (int i = 0; i < ids.length; i += batchSize) {
-        final batchIds = ids.sublist(i, (i + batchSize > ids.length) ? ids.length : i + batchSize);
-        
-        List<String> currentNames = [];
-        List<Future<ProductModel?>> futures = [];
-        List<ProductModel> oldBatchProducts = [];
+      // كل المنتجات مرتبة من الأقدم فحصاً للأحدث
+      final List<ProductModel> allToCheck = List.from(_products);
+      allToCheck.sort((a, b) {
+        if (a.lastChecked == null && b.lastChecked != null) return -1;
+        if (a.lastChecked != null && b.lastChecked == null) return 1;
+        if (a.lastChecked == null && b.lastChecked == null) return 0;
+        return a.lastChecked!.compareTo(b.lastChecked!);
+      });
 
-        for (final id in batchIds) {
-          final currentIndex = _products.indexWhere((p) => p.id == id);
-          if (currentIndex == -1) continue;
+      // فحص الكل — concurrency فقط هو عدد المتوازيين
+      _refreshCheckedCount = 0;
+      _refreshTotalCount = allToCheck.length;
+      _refreshCurrentName = '';
 
-          final old = _products[currentIndex];
-          oldBatchProducts.add(old);
-          
-          String shortName = old.title.length > 20
-              ? '${old.title.substring(0, 20)}...'
-              : old.title;
-          currentNames.add(shortName);
+      debugPrint(
+          '[Refresh] Starting full refresh: ${allToCheck.length} products, concurrency=$concurrency');
 
-          futures.add(_refreshSingleProduct(old));
-        }
+      int reachedTargetCount = 0;
+      const int progressNotifId = 997;
 
-        if (futures.isEmpty) continue;
+      // نفحص بـ chunks بحيث كل chunk = concurrency منتجات تشتغل بالتوازي
+      for (int start = 0; start < allToCheck.length; start += concurrency) {
+        final chunkEnd =
+            (start + concurrency).clamp(0, allToCheck.length);
+        final chunk = allToCheck.sublist(start, chunkEnd);
 
-        _refreshCurrentName = currentNames.join(' و ');
+        // اسم أول منتج في الـ chunk للإشعار
+        final firstName = chunk.first.title.length > 25
+            ? '${chunk.first.title.substring(0, 25)}...'
+            : chunk.first.title;
 
-        // 🔔 تحديث إشعار التقدم في الخلفية
-        await NotificationService().showProgressNotification(
-          id: _progressNotifId,
-          current: loopCount,
-          total: _products.length,
-          currentProductName: _refreshCurrentName,
-        );
-
-        _currentlyRefreshingIds = batchIds.toList();
+        _refreshCurrentName = firstName;
+        _currentlyRefreshingIds = chunk.map((p) => p.id).toList();
         notifyListeners();
 
-        final results = await Future.wait(futures);
+        // 🔔 إشعار تقدم قبل بدء الـ chunk
+        await NotificationService().showProgressNotification(
+          id: progressNotifId,
+          checkedSoFar: start,
+          total: allToCheck.length,
+          currentName: firstName,
+        );
 
-        _currentlyRefreshingIds.clear();
-        loopCount += futures.length;
-        _refreshCheckedCount = loopCount;
-        
-        _lastUpdatedClearTimer?.cancel();
-        _lastUpdatedIds.clear();
+        // ✅ فحص كل المنتجات في الـ chunk بالتوازي
+        final results = await Future.wait(
+          chunk.map((old) => _refreshSingleProduct(old)),
+        );
 
-        for (int j = 0; j < results.length; j++) {
+        // حدّث القائمة بنتائج الـ chunk
+        for (int j = 0; j < chunk.length; j++) {
+          final old = chunk[j];
           final updated = results[j];
           if (updated != null) {
-            final old = oldBatchProducts[j];
-            // ✅ أزّل من مكانه الحالي وحطه في الأول
             final idx = _products.indexWhere((p) => p.id == updated.id);
             if (idx != -1) {
-              _products.removeAt(idx);
-              _products.insert(0, updated);
+              _products[idx] = updated;
             }
-
-            if (updated.currentPrice > 0) updatedCount++;
-
-            // 🟢 فلاش للمنتج اللي اتحدث
             _lastUpdatedIds.add(updated.id);
-
             if (updated.hasReachedTarget && !old.hasReachedTarget) {
               reachedTargetCount++;
               _triggerNotification(updated);
             }
           }
         }
-        
-        if (_lastUpdatedIds.isNotEmpty) {
-          _lastUpdatedClearTimer = Timer(
-            const Duration(milliseconds: 2500),
-            () {
-              _lastUpdatedIds.clear();
-              notifyListeners();
-            },
-          );
-        }
+
+        _refreshCheckedCount = chunkEnd;
         notifyListeners();
+        // ✅ لا يوجد أي delay هنا — ينتقل للـ chunk التالي فوراً
       }
 
+      _currentlyRefreshingIds.clear();
+
+      if (_lastUpdatedIds.isNotEmpty) {
+        _lastUpdatedClearTimer?.cancel();
+        _lastUpdatedClearTimer = Timer(
+          const Duration(milliseconds: 2500),
+          () {
+            _lastUpdatedIds.clear();
+            notifyListeners();
+          },
+        );
+      }
+
+      notifyListeners();
       await _saveToStorage();
 
-      // إلغاء إشعار التقدم وإظهار النتيجة النهائية
-      await NotificationService().dismissNotification(_progressNotifId);
+      // إلغاء إشعار التقدم وإظهار الملخص
+      await NotificationService().dismissNotification(progressNotifId);
 
-      String summaryTitle = '✅ اكتمل الفحص الدوري';
-      String summaryBody = 'تم فحص ${_products.length} منتجات.';
+      final String summaryTitle = '✅ اكتمل فحص جميع المنتجات';
+      final StringBuffer sb = StringBuffer();
+      sb.write('تم فحص ${allToCheck.length} منتجات.');
       if (reachedTargetCount > 0) {
-        summaryBody += '\n🎯 $reachedTargetCount منتج وصل للسعر المستهدف!';
+        sb.write('\n🎯 $reachedTargetCount منتج وصل للسعر المستهدف!');
       }
+      final String summaryBody = sb.toString();
 
       await NotificationService().showNotification(
         id: 998,
         title: summaryTitle,
         body: summaryBody,
       );
-
       notificationsViewModel?.addNotification(
         title: summaryTitle,
         body: summaryBody,
@@ -658,6 +655,7 @@ class TargetProductsViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
 
   /// يحدّث منتج واحد ويرجع النسخة الجديدة أو null لو فشل
   Future<ProductModel?> _refreshSingleProduct(ProductModel old) async {

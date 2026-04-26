@@ -12,51 +12,60 @@ void callbackDispatcher() {
     WidgetsFlutterBinding.ensureInitialized();
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Use same key as TargetProductsViewModel ('target_products_cache')
       final String? productsJsonStr = prefs.getString('target_products_cache');
-      
       if (productsJsonStr == null || productsJsonStr.isEmpty) return true;
 
       List<ProductModel> products = (jsonDecode(productsJsonStr) as List)
           .map((item) => ProductModel.fromJson(item))
           .toList();
 
+      // ✅ ذكاء في الفحص: ترتيب المنتجات ليتم فحص الأقدم (التي لم تفحص مؤخراً) أولاً
+      // هذا يضمن أنه لو توقف الفحص في النصف بسبب انتهاء الوقت، سيبدأ المرة القادمة بالمنتجات التي لم تُفحص
+      products.sort((a, b) {
+        if (a.lastChecked == null && b.lastChecked != null) return -1;
+        if (a.lastChecked != null && b.lastChecked == null) return 1;
+        if (a.lastChecked == null && b.lastChecked == null) return 0;
+        return a.lastChecked!.compareTo(b.lastChecked!);
+      });
+
+      // اقرأ إعداد التوازي من الـ settings
+      final int concurrency = prefs.getInt('concurrent_products') ?? 1;
+
       final scraper = PriceScraperService();
       final notifications = NotificationService();
       await notifications.init();
-      
+
       bool updatedSomething = false;
       int reachedCount = 0;
       const int progressNotifId = 997;
-      int loopIdx = 0;
+      List<String> droppedProductsStrings = [];
 
-      // 🔔 إشعار بدء فحص الخلفية
-      await notifications.showProgressNotification(
-        id: progressNotifId,
-        current: 0,
-        total: products.length,
-        currentProductName: '',
-      );
+      // فحص الكل بـ concurrent chunks — بدون أي delay بين الـ chunks
+      for (int start = 0; start < products.length; start += concurrency) {
+        final chunkEnd = (start + concurrency).clamp(0, products.length);
+        final chunk = products.sublist(start, chunkEnd)
+            .where((p) => !p.isAnalyzing)
+            .toList();
+        if (chunk.isEmpty) continue;
 
-      for (var product in products) {
-        if (product.isAnalyzing) continue;
+        final firstName = chunk.first.title.length > 30
+            ? '${chunk.first.title.substring(0, 30)}...'
+            : chunk.first.title;
 
-        final shortName = product.title.length > 30
-            ? '${product.title.substring(0, 30)}...'
-            : product.title;
-
+        // 🔔 إشعار تقدم قبل بدء الـ chunk
         await notifications.showProgressNotification(
           id: progressNotifId,
-          current: loopIdx,
+          checkedSoFar: start,
           total: products.length,
-          currentProductName: shortName,
+          currentName: firstName,
         );
-        loopIdx++;
 
-        try {
-          // ✅ HTTP فقط — WebView مبيشتغلش في Workmanager background isolate
-          final result = await scraper.scrapeWithHttpOnly(product.originalUrl);
-          if (result != null && result['price'] != null) {
+        // ✅ فحص كل المنتجات في الـ chunk بالتوازي
+        final futures = chunk.map((product) async {
+          try {
+            final result = await scraper.scrapeWithHttpOnly(product.originalUrl);
+            if (result == null || result['price'] == null) return;
+
             List<ProductSeller> sellers = [];
             if (result['sellers'] != null && result['sellers'] is List) {
               sellers = (result['sellers'] as List)
@@ -64,59 +73,83 @@ void callbackDispatcher() {
                   .map((s) => ProductSeller.fromJson(Map<String, dynamic>.from(s)))
                   .toList();
             }
-            
-            // Sort sellers to find absolute lowest
+
             final double mainPrice = (result['price'] as num).toDouble();
-            final bool primaryExists = sellers.any((s) => (s.price - mainPrice).abs() < 0.01);
-            if (!primaryExists && mainPrice > 0) {
+            if (!sellers.any((s) => (s.price - mainPrice).abs() < 0.01) && mainPrice > 0) {
               sellers.add(ProductSeller(name: product.storeName, price: mainPrice));
             }
-            
             sellers.sort((a, b) => a.price.compareTo(b.price));
             final double lowestPrice = sellers.isNotEmpty ? sellers.first.price : mainPrice;
+            final double oldPrice = product.currentPrice;
 
-            if (lowestPrice <= product.targetPrice && (product.currentPrice > product.targetPrice || product.currentPrice == 0)) {
+            if (lowestPrice <= product.targetPrice &&
+                (oldPrice > product.targetPrice || oldPrice <= 0)) {
               reachedCount++;
-              final title = '🎉 مبروك! وصل سعرك المفضل للهدف';
-              final body = 'المنتج \"${_shortenTitle(product.title)}\" متاح الآن بسعر ${lowestPrice.toStringAsFixed(2)} ريال في موقع ${product.storeName}. اطلبه الآن!';
-
-              
-              await notifications.showNotification(
-                id: product.id.hashCode,
-                title: title,
-                body: body,
-              );
-              await _saveNotificationToHistory(title, body);
+              double dropPercent = 0;
+              if (oldPrice > 0) {
+                 dropPercent = ((oldPrice - lowestPrice) / oldPrice) * 100;
+              } else if (product.priceHistory.isNotEmpty && product.priceHistory.first > lowestPrice) {
+                 dropPercent = ((product.priceHistory.first - lowestPrice) / product.priceHistory.first) * 100;
+              }
+              String percentText = dropPercent > 0 ? ' (-${dropPercent.toStringAsFixed(0)}%)' : '';
+              droppedProductsStrings.add('🎯 ${_shortenTitle(product.title)}$percentText بـ ${lowestPrice.toStringAsFixed(0)}');
+            } else if (oldPrice > 0 && lowestPrice < oldPrice) {
+              double dropPercent = ((oldPrice - lowestPrice) / oldPrice) * 100;
+              if (dropPercent >= 1) {
+                 droppedProductsStrings.add('🔽 ${_shortenTitle(product.title)} (-${dropPercent.toStringAsFixed(0)}%) بـ ${lowestPrice.toStringAsFixed(0)}');
+              }
             }
 
-            final updatedProduct = product.copyWith(
-              currentPrice: lowestPrice,
-              sellers: sellers,
-              lastChecked: DateTime.now(),
-              isAnalyzing: false,
-              error: null,
-            );
-            
-            int index = products.indexWhere((p) => p.id == product.id);
-            if (index != -1) {
-              products[index] = updatedProduct;
+            final idx = products.indexWhere((p) => p.id == product.id);
+            if (idx != -1) {
+              products[idx] = product.copyWith(
+                currentPrice: lowestPrice,
+                sellers: sellers,
+                lastChecked: DateTime.now(),
+                isAnalyzing: false,
+                error: null,
+              );
               updatedSomething = true;
             }
+          } catch (e) {
+            debugPrint('Background: error checking ${product.id}: $e');
           }
-        } catch (e) {
-          debugPrint('Error checking product ${product.id}: $e');
+        });
+
+        await Future.wait(futures);
+        // ✅ لا يوجد delay — ينتقل للـ chunk التالي فوراً
+
+        // حفظ المنتجات في الذاكرة أولاً بأول لكي لا نفقد البيانات لو توقفت العملية أو انتهى الوقت
+        if (updatedSomething) {
+          await prefs.setString(
+            'target_products_cache',
+            jsonEncode(products.map((p) => p.toJson()).toList()),
+          );
         }
+
+        // إشعار تقدم بعد اكتمال الـ chunk
+        await notifications.showProgressNotification(
+          id: progressNotifId,
+          checkedSoFar: chunkEnd,
+          total: products.length,
+          currentName: firstName,
+        );
       }
+
 
       // إلغاء إشعار التقدم
       await notifications.dismissNotification(progressNotifId);
 
       if (updatedSomething) {
-        // إشعار نهائي
-        final String summaryTitle = '✅ اكتمل الفحص الدوري';
+        final String summaryTitle = reachedCount > 0 ? '🎉 $reachedCount منتج وصل للمطلوب!' : 'تحديث أسعار المنتجات';
         final StringBuffer sb = StringBuffer();
-        sb.write('تم فحص ${products.length} منتجات.');
-        if (reachedCount > 0) sb.write('\n🎯 $reachedCount منتج وصل للسعر المستهدف!');
+        
+        if (droppedProductsStrings.isNotEmpty) {
+          sb.write(droppedProductsStrings.join('\n'));
+        } else {
+          sb.write('تم فحص ${products.length} منتجات ولم يتم رصد تخفيضات جديدة.');
+        }
+        
         final String summaryBody = sb.toString();
 
         await notifications.showNotification(

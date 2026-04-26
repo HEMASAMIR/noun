@@ -36,13 +36,33 @@ class NotificationService {
     );
   }
 
-  /// إشعار تقدم حي (يتحدث مع كل منتج)
+  /// إشعار تقدم حي — يتحدث مع كل منتج يُفحص
+  /// [checkedSoFar] = عدد المنتجات اللي اتفحصت فعلاً
+  /// [total]        = إجمالي عدد المنتجات
+  /// [currentName]  = اسم المنتج اللي بيتفحص الحين
   Future<void> showProgressNotification({
     required int id,
-    required int current,
+    required int checkedSoFar,
     required int total,
-    required String currentProductName,
+    required String currentName,
   }) async {
+    if (total <= 0) return;
+
+    // النسبة على أساس المنتجات اللي خلصت
+    final int percent = ((checkedSoFar / total) * 100).round();
+    final int remaining = total - checkedSoFar;
+    final int currentNum = checkedSoFar + 1; // المنتج الحالي (1-indexed)
+
+    // عنوان: رقم المنتج الحالي / الكل — نسبة%
+    final String title = '🔄 فحص ($currentNum/$total) — $percent٪';
+
+    // اسم المنتج بس — واحدهم في كل مرة
+    final String shortName = currentName.length > 28
+        ? '${currentName.substring(0, 28)}...'
+        : currentName;
+    final String body = '📦 $shortName\n'
+        'باقي $remaining منتج';
+
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'wasfy_progress_channel',
       'Wasfy - تقدم الفحص الدوري',
@@ -54,18 +74,14 @@ class NotificationService {
       onlyAlertOnce: true,
       showProgress: true,
       maxProgress: total,
-      progress: current,
-      indeterminate: current == 0,
+      progress: checkedSoFar,   // ← شريط التقدم يتحرك مع كل منتج
+      indeterminate: false,     // ← دايماً محدد ومش ثابت
     );
 
     final NotificationDetails details = NotificationDetails(android: androidDetails);
-
-    final String body = current == 0
-        ? 'جاري بدء الفحص...'
-        : 'جاري الفحص ($current/$total): $currentProductName';
-
-    await _notificationsPlugin.show(id, '🔄 الفحص الدوري', body, details);
+    await _notificationsPlugin.show(id, title, body, details);
   }
+
 
   /// إلغاء إشعار
   Future<void> dismissNotification(int id) async {
@@ -78,18 +94,19 @@ class NotificationService {
     required String body,
   }) async {
 
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+    final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
       'wasfy_products_channel',
       'Wasfy - تنبيهات الأسعار',
       channelDescription: 'قناة تنبيهات الوصول للسعر المستهدف للمنتجات',
       importance: Importance.max,
       priority: Priority.high,
       showWhen: true,
+      styleInformation: BigTextStyleInformation(body),
     );
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    final NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
-      iOS: DarwinNotificationDetails(),
+      iOS: const DarwinNotificationDetails(),
     );
 
     await _notificationsPlugin.show(

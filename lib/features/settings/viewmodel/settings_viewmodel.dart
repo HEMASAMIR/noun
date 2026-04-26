@@ -19,7 +19,7 @@ class SettingsViewModel extends ChangeNotifier {
   static const String _keyDarkMode = 'dark_mode';
 
   bool _isForegroundServiceEnabled = true;
-  int _selectedConcurrentProducts = 2;
+  int _selectedConcurrentProducts = 1;
   double _checkIntervalValue = 2.0;
   String _checkIntervalUnit = 'ساعات';
   bool _isDarkMode = false;
@@ -43,7 +43,7 @@ class SettingsViewModel extends ChangeNotifier {
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     _isForegroundServiceEnabled = prefs.getBool(_keyForegroundService) ?? true;
-    _selectedConcurrentProducts = prefs.getInt(_keyConcurrentProducts) ?? 2;
+    _selectedConcurrentProducts = prefs.getInt(_keyConcurrentProducts) ?? 1;
     _checkIntervalValue = prefs.getDouble(_keyCheckIntervalValue) ?? 2.0;
     _checkIntervalUnit = prefs.getString(_keyCheckIntervalUnit) ?? 'ساعات';
     _isDarkMode = prefs.getBool(_keyDarkMode) ?? false;
@@ -190,8 +190,8 @@ class SettingsViewModel extends ChangeNotifier {
     }
 
     await Workmanager().registerPeriodicTask(
-      "periodic-check-task",
-      "periodicCheck",
+      "wasfy_price_check",
+      "periodicPriceCheck",
       frequency: frequency,
       constraints: Constraints(
         networkType: NetworkType.connected,

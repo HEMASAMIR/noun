@@ -8,7 +8,7 @@ class AddProductData {
   final TextEditingController priceController;
 
   AddProductData()
-      : linkController = TextEditingController(),
+      : linkController = TextEditingController(text: 'https://www.noon.com/saudi-ar/galaxy-a17-dual-sim-gray-6gb-128gb-5g-middle-east-version/N70202453V/p/'),
         priceController = TextEditingController();
 
   void dispose() {

@@ -143,9 +143,15 @@ class _TargetProductsViewState extends State<_TargetProductsView>
           AnimatedSize(
             duration: const Duration(milliseconds: 350),
             curve: Curves.easeInOut,
-            child: viewModel.isRefreshing
-                ? _RefreshBanner()
-                : const SizedBox.shrink(),
+            alignment: Alignment.topCenter,
+            child: () {
+              if (viewModel.isRefreshing) {
+                return _RefreshBanner();
+              } else if (viewModel.hasActiveTimer && viewModel.secondsUntilNextRefresh > 0) {
+                return const _CountdownBanner();
+              }
+              return const SizedBox.shrink();
+            }(),
           ),
           // ── Tab Content ─────────────────────────────────────────────────
           Expanded(
@@ -407,6 +413,43 @@ class _RefreshBannerState extends State<_RefreshBanner>
             minHeight: 4,
             backgroundColor: const Color(0xFFFDE68A),
             valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFF59E0B)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Countdown Banner Widget ──────────────────────────────────────────────────
+
+class _CountdownBanner extends StatelessWidget {
+  const _CountdownBanner({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<TargetProductsViewModel>();
+    final int totalSeconds = vm.secondsUntilNextRefresh;
+    
+    final int minutes = totalSeconds ~/ 60;
+    final int seconds = totalSeconds % 60;
+    final String timeStr = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    
+    return Container(
+      width: double.infinity,
+      color: AppColors.primary.withOpacity(0.08),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.timer_outlined, size: 16, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Text(
+            'يبدأ الفحص الآلي القادم خلال: $timeStr',
+            style: const TextStyle(
+              color: AppColors.primary,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
           ),
         ],
       ),

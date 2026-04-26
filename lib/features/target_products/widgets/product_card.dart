@@ -343,15 +343,15 @@ class _ProductCardState extends State<ProductCard>
           children: [
             const Icon(Icons.sell_outlined, size: 14, color: AppColors.primary),
             const SizedBox(width: 6),
-            const Text(
-              "أفضل العروض المتاحة الآن:",
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            Text(
+              "عروض البائعين (${product.sellers.length}):",
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ],
         ),
         const SizedBox(height: 4),
         ...product.sellers
-            .take(2)
+            .take(5)
             .map(
               (s) => Padding(
                 padding: const EdgeInsets.only(bottom: 2),
@@ -360,7 +360,7 @@ class _ProductCardState extends State<ProductCard>
                   children: [
                     Expanded(
                       child: Text(
-                        s.name,
+                        '👤 ${s.name}',
                         style: const TextStyle(
                           fontSize: 11,
                           color: AppColors.textSecondary,
@@ -375,6 +375,7 @@ class _ProductCardState extends State<ProductCard>
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
+                        color: AppColors.primary,
                       ),
                     ),
                   ],
